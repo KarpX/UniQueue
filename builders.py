@@ -17,7 +17,7 @@ class ReplyKeyboardBuilderFactory:
 
     @staticmethod
     def create_main_menu_keyboard() -> ReplyKeyboardBuilder:
-        buttons = [button.value for button in MainMenuButtons]
+        buttons = [MainMenuButtons.CREATE_ROOM.value, MainMenuButtons.JOIN_ROOM.value, MainMenuButtons.USER_ROOMS.value]
         return ReplyKeyboardBuilderFactory().build_keyboard(buttons, adjust=[1, 1, 1])
 
 
@@ -39,7 +39,8 @@ class InlineKeyboardBuilderFactory:
             buttons.append(("Создать очередь", f"room_settings:create_queue:{room_id}"))
             buttons.append(("Настройки", f"room_settings:settings:{room_id}"))
             buttons.append(("Участники", f"room_settings:members:{room_id}"))
-        
+
+        buttons.append(("Очереди", f"queue:{room_id}"))
         buttons.append(("Выйти из комнаты", f"leave_room:{room_id}"))
         buttons.append(("Назад", "back"))
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 2, 1])

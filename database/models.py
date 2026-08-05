@@ -75,3 +75,4 @@ class QueueEntry(BaseModel):
     joined_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     
     queue: Mapped["QueueModel"] = relationship(back_populates="entries")
+    user: Mapped["UserModel"] = relationship()
