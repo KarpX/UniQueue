@@ -1,7 +1,0 @@
-﻿refactor: split main.py into accessors and handlers
-
-Move database access logic into accessors/ (users.py, rooms.py, queues.py) and bot request handling into handlers/ (users.py, rooms.py, queues.py).
-
-This separates concerns: accessors contain DB queries, handlers implement request processing, and main.py delegates to handlers while preserving handler registration.
-
-Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
