@@ -52,8 +52,6 @@ class CreateQueueState(StatesGroup):
     waiting_for_queue_name = State()
 
 
-# get_or_create_user is provided by accessors.users.get_or_create_user
-
 
 @dp.message(Command("start"))
 async def start_command(message):
@@ -121,16 +119,9 @@ async def process_invite_code(message, state: FSMContext):
 
 # ----------------- Queue Functions ------------------
 
-# get_queue_with_data is implemented in accessors.queues.get_queue_with_data
-
-
 async def generate_queue_message(user_id: int, queue: QueueModel):
     # delegate to handlers.queues.generate_queue_message
     return await handlers_queues.generate_queue_message(user_id, queue)
-
-
-# reindex_queue is implemented in accessors.queues.reindex_queue
-
 
 @dp.callback_query(F.data.startswith("open_queue:"))
 async def open_queue_callback(callback_query: CallbackQuery):

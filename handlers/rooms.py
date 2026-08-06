@@ -6,19 +6,21 @@ from accessors.rooms import (
     get_room_by_id,
     get_members_of_room,
 )
-from accessors.queues import get_queues_by_room
+from accessors.queues import get_queues_by_room, reindex_queue
 from database.session import async_session
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
-from database.models import RoomMember, RoomModel, UserModel, UserRole, QueueModel
+from database.models import QueueEntry, RoomMember, RoomModel, UserModel, UserRole, QueueModel
 from enums import MainMenuButtons
 from aiogram import F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
+from main import CreateQueueState, CreateRoomState, JoinRoomState
+
 
 async def create_room_command(message, state: FSMContext):
-    await state.set_state("waiting_for_room_name")
+    await state.set_state(CreateRoomState.waiting_for_room_name)
     await message.answer(
         "Введите название комнаты:",
         reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
@@ -145,6 +147,27 @@ async def leave_room(callback_query: CallbackQuery):
             await callback_query.message.answer("Вы не состоите в этой комнате")
             return
 
+        queues_stmt = (
+            select(QueueModel.id).filter_by(room_id=room_id)
+        )
+        queues_result = await session.execute(queues_stmt)
+        room_queues_ids = queues_result.scalars().all()
+
+        if room_queues_ids:
+            delete_entries_stmt = (
+                delete(QueueEntry)
+                .where(
+                    QueueEntry.user_id == user_id,
+                    QueueEntry.queue_id.in_(room_queues_ids)
+                )
+            )
+            await session.execute(delete_entries_stmt)
+
+            await session.flush()
+
+            for q_id in room_queues_ids:
+                await reindex_queue(session, q_id)
+
         if len(room.members) == 1:
             await session.delete(room)
             await session.commit()
@@ -157,6 +180,7 @@ async def leave_room(callback_query: CallbackQuery):
             if new_admin:
                 new_admin.role = UserRole.ADMIN
 
+        
 
         await session.delete(room_member)
         await session.commit()
@@ -180,7 +204,7 @@ async def room_settings_callback(callback_query: CallbackQuery, state: FSMContex
         return
 
     if action == "create_queue":
-        await state.set_state("waiting_for_queue_name")
+        await state.set_state(CreateQueueState.waiting_for_queue_name)
         await state.update_data(room_id=room_id)
         await callback_query.message.answer(
             "Введите название очереди:",
@@ -197,7 +221,7 @@ async def room_settings_callback(callback_query: CallbackQuery, state: FSMContex
 
 
 async def join_room_command(message, state: FSMContext):
-    await state.set_state("waiting_for_invite_code")
+    await state.set_state(JoinRoomState.waiting_for_invite_code)
     await message.answer(
         "Введите код приглашения комнаты:",
         reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
