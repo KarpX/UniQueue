@@ -1,5 +1,5 @@
 from database.session import async_session
-from database.models import RoomModel, RoomMember, UserModel, UserRole
+from database.models import QueueModel, RoomModel, RoomMember, UserModel, UserRole
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -51,3 +51,20 @@ async def create_room_with_unique_code(room_name: str, creator_id: int) -> RoomM
         session.add(room_member)
         await session.commit()
         return room
+
+async def get_room_with_queue(queue_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if not queue:
+            return None
+
+        room_stmt = select(RoomModel).options(selectinload(RoomModel.members)).filter(RoomModel.id == queue.room_id)
+        room = await session.execute(room_stmt)
+        room_res = room.scalar_one_or_none()
+
+        return room_res

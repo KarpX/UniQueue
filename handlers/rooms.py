@@ -16,7 +16,7 @@ from aiogram import F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-from main import CreateQueueState, CreateRoomState, JoinRoomState
+from states import CreateQueueState, CreateRoomState, JoinRoomState
 
 
 async def create_room_command(message, state: FSMContext):
@@ -87,11 +87,11 @@ async def room_callback(callback_query: CallbackQuery):
         room_member = await session.get(RoomMember, (user.id, room.id))
 
     if not room_member:
-        await callback_query.message.answer(
+        await callback_query.answer(
             "Вы не состоите в этой комнате",
-            reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+            show_alert=True
         )
-        return
+        return await callback_query.message.delete()
 
     user_role = room_member.role.value
     text = (f"Комната: <b>{room.name}</b>\n"
@@ -179,8 +179,6 @@ async def leave_room(callback_query: CallbackQuery):
             new_admin = next((m for m in room.members if m.user_id != user_id), None)
             if new_admin:
                 new_admin.role = UserRole.ADMIN
-
-        
 
         await session.delete(room_member)
         await session.commit()
@@ -274,11 +272,16 @@ async def process_invite_code(message, state: FSMContext):
     )
 
 
-async def queue_callback(callback_query: CallbackQuery):
-    room_id = int(callback_query.data.split(":")[1])
+async def queue_callback(callback_query: CallbackQuery, room_id: int | None = None):
+    if not room_id:
+        room_id = int(callback_query.data.split(":")[1])
+    
+    user_id = callback_query.message.from_user.id
     async with async_session() as session:
         result = await session.execute(
-            select(RoomModel).filter(RoomModel.id == room_id)
+            select(RoomModel)
+            .options(selectinload(RoomModel.members))
+            .filter(RoomModel.id == room_id)
         )
         room = result.scalar_one_or_none()
 
@@ -287,9 +290,17 @@ async def queue_callback(callback_query: CallbackQuery):
         )
         queues = queue_res.scalars().all()
 
+    room_users_ids = [member.user_id for member in room.members]
     if not room:
-        return await callback_query.message.answer(
-            "Такая комната не существует"
+        return await callback_query.answer(
+            "Такая комната не существует",
+            show_alert=True
+        )
+
+    if user_id and user_id in room_users_ids:
+        return await callback_query.answer(
+            "Вы не участник комнаты",
+            show_alert=True
         )
 
     buttons = [(queue.name, f"open_queue:{queue.id}") for queue in queues]

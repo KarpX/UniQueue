@@ -1,14 +1,17 @@
+from accessors.rooms import get_room_with_queue
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
-from accessors.queues import get_queue_with_data, reindex_queue
+from accessors.queues import delete_queue, get_queue_with_data, reindex_queue
+from aiogram.fsm.context import FSMContext
 from accessors.users import get_or_create_user
 from database.session import async_session
 from database.models import QueueModel, QueueEntry, UserModel, RoomMember, UserRole
 from sqlalchemy import delete, select
-from sqlalchemy.orm import selectinload
 from enums import QueueInlineButtons, MainMenuButtons
 from aiogram.types import CallbackQuery
 from aiogram import F
 import logging
+
+from states import CreateQueueState
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +19,11 @@ logger = logging.getLogger(__name__)
 async def generate_queue_message(user_id: int, queue: QueueModel):
     text_lines = [f"Очередь <b>{queue.name}</b>", ""]
     user_ids_in_queue = [entry.user_id for entry in queue.entries]
+
+    room = await get_room_with_queue(queue.id)
+    logger.info(room.id)
+    room_members_admin_ids = [member.user_id for member in room.members if member.role == UserRole.ADMIN]
+    logger.info(room_members_admin_ids)
 
     if not queue.entries:
         text_lines.append("<i>Пусто...</i>")
@@ -27,24 +35,14 @@ async def generate_queue_message(user_id: int, queue: QueueModel):
 
     is_in_queue = user_id in user_ids_in_queue
 
-    buttons = []
-    if not is_in_queue:
-        buttons.append((QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue.id}"))
-    else:
-        buttons.append((QueueInlineButtons.EXIT_QUEUE.value, f"queue_control:exit:{queue.id}"))
-
-    buttons.extend([
-        (QueueInlineButtons.SKIP_QUEUE.value, f"queue_control:skip:{queue.id}"),
-        (QueueInlineButtons.BACK_QUEUE.value, f"queue:{queue.room_id}")
-    ])
-
-    return "\n".join(text_lines), buttons
+    keyboard = InlineKeyboardBuilderFactory.queue_inline_keyboard(user_id, is_in_queue, room_members_admin_ids, queue.id, queue.room_id)
+    
+    return "\n".join(text_lines), keyboard
 
 
 async def process_queue_name(message, state):
     queue_name = message.text
     room_id = (await state.get_data()).get("room_id")
-    logger.info(f"User {message.from_user.id} is creating queue '{queue_name}' in room {room_id}")
     if queue_name == MainMenuButtons.CANCEL.value:
         await state.clear()
         await message.answer(
@@ -87,10 +85,10 @@ async def open_queue_callback(callback_query: CallbackQuery):
     if not queue:
         return await callback_query.answer("Очередь не найдена")
 
-    text, buttons = await generate_queue_message(callback_query.from_user.id, queue)
+    text, keyboard = await generate_queue_message(callback_query.from_user.id, queue)
     await callback_query.message.edit_text(
         text,
-        reply_markup=InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1, 1]),
+        reply_markup=keyboard,
         parse_mode="HTML"
     )
     await callback_query.answer()
@@ -159,16 +157,96 @@ async def queue_control_handler(callback_query: CallbackQuery):
         
         updated_queue = await get_queue_with_data(session, queue_id)
 
-    text, buttons = await generate_queue_message(user_id, updated_queue)
+    text, keyboard = await generate_queue_message(user_id, updated_queue)
     try:
         await callback_query.message.edit_text(
             text,
-            reply_markup=InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1, 1]),
+            reply_markup=keyboard,
             parse_mode="HTML"
         )
     except Exception:
         logger.info("Ошибка при изменении сообщения очереди")
         pass
 
+async def queue_admin_handler(callback_query: CallbackQuery, state: FSMContext):
+    method = callback_query.data.split(":")[1]
+    queue_id = callback_query.data.split(":")[2]
+
+    if method == "settings":
+        await queue_settings_handler(callback_query)
+    elif method == "delete":
+        await queue_delete_handler(callback_query)
+    elif method == "rename":
+        await queue_rename_handler(callback_query, state)
+
+async def queue_settings_handler(callback_query: CallbackQuery):
+    queue_id = callback_query.data.split(":")[2]
+    keyboard = InlineKeyboardBuilderFactory.queue_settings_keyboard(queue_id)
+
+    await callback_query.message.edit_text(
+        "Выберите действие",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+
+async def queue_delete_handler(callback_query: CallbackQuery, state: FSMContext):
+    from handlers.rooms import queue_callback
+
+    queue_id = int(callback_query.data.split(":")[2])
+    room_id = await delete_queue(queue_id)
+
+    if not room_id:
+        return await callback_query.message.delete()
+
+    await callback_query.answer("Очередь удалена")
+
+    await queue_callback(callback_query, room_id)
+
+async def queue_rename_text_handler(message, state: FSMContext):
+    queue_name = message.text
+    queue_id = (await state.get_data()).get("queue_id")
+    if queue_name == MainMenuButtons.CANCEL.value:
+        await state.clear()
+        await message.answer(
+            "Переименование очереди отменено",
+            reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+        )
+        return
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if not queue:
+            await message.answer(
+                "Комната не существует",
+                reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+            )
+            await state.clear()
+            return
+
+        queue.name = queue_name
+        await session.commit()
+
+    await state.clear()
+    await message.answer(
+        f"Очередь '{queue.name}' успешно переименована!",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+    )
+
+async def queue_rename_handler(callback_query: CallbackQuery, state: FSMContext):
+    queue_id = int(callback_query.data.split(":")[2])
+    await state.set_state(CreateQueueState.waiting_for_queue_rename)
+    await state.update_data(queue_id=queue_id)
+    await callback_query.message.answer(
+        "Введите новое название очереди:",
+        reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
+    )
+
+async def queue_back_hanlder(callback_query: CallbackQuery):
+    await open_queue_callback(callback_query)
 
 # End of queues handlers

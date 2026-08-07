@@ -13,7 +13,6 @@ from sqlalchemy.orm import selectinload
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
 from database.models import QueueEntry, QueueModel, RoomMember, RoomModel, UserModel, UserRole
 from database.session import async_session
-from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from enums import MainMenuButtons, QueueInlineButtons
 
@@ -26,6 +25,7 @@ from accessors.queues import get_queue_with_data, reindex_queue
 import handlers.users as handlers_users
 import handlers.rooms as handlers_rooms
 import handlers.queues as handlers_queues
+from states import CreateQueueState, CreateRoomState, JoinRoomState
 
 
 load_dotenv()
@@ -38,19 +38,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-
-class CreateRoomState(StatesGroup):
-    waiting_for_room_name = State()
-
-
-class JoinRoomState(StatesGroup):
-    waiting_for_invite_code = State()
-
-
-class CreateQueueState(StatesGroup):
-    waiting_for_queue_name = State()
-
 
 
 @dp.message(Command("start"))
@@ -131,6 +118,19 @@ async def open_queue_callback(callback_query: CallbackQuery):
 @dp.callback_query(F.data.startswith("queue_control:"))
 async def queue_control_handler(callback_query: CallbackQuery):
     await handlers_queues.queue_control_handler(callback_query)
+
+
+@dp.callback_query(F.data.startswith("queue_admin:"))
+async def queue_settings_handler(callback_query: CallbackQuery, state: FSMContext):
+    await handlers_queues.queue_admin_handler(callback_query, state)
+
+@dp.callback_query(F.data.startswith("queue_back:"))
+async def queue_back_handler(callback_query: CallbackQuery):
+    await handlers_queues.queue_back_hanlder(callback_query)
+
+@dp.message(CreateQueueState.waiting_for_queue_rename)
+async def queue_rename_handler(message, state: FSMContext):
+    await handlers_queues.queue_rename_text_handler(message, state)
 
 # ----------------- Helper Functions -----------------
 
