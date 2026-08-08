@@ -13,3 +13,8 @@ class JoinRoomState(StatesGroup):
 class CreateQueueState(StatesGroup):
     waiting_for_queue_name = State()
     waiting_for_queue_rename = State()
+
+
+class SwapEntriesState(StatesGroup):
+    waiting_postition = State()
+    waiting_comment = State()

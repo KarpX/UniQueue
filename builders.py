@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardButton, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from database.models import UserRole
-from enums import MainMenuButtons, MemberInlineButtons, QueueInlineButtons, RoomInlineButtons, RoomSettingsButtons
+from enums import MainMenuButtons, MemberInlineButtons, QueueInlineButtons, RoomInlineButtons, RoomSettingsButtons, SwapInlineButtons, WritingCommentButtons
 
 
 class ReplyKeyboardBuilderFactory:
@@ -19,6 +19,16 @@ class ReplyKeyboardBuilderFactory:
     def create_main_menu_keyboard() -> ReplyKeyboardBuilder:
         buttons = [MainMenuButtons.CREATE_ROOM.value, MainMenuButtons.JOIN_ROOM.value, MainMenuButtons.USER_ROOMS.value]
         return ReplyKeyboardBuilderFactory().build_keyboard(buttons, adjust=[1, 1, 1])
+
+    @staticmethod
+    def create_writing_comment_keyboard():
+        buttons = [WritingCommentButtons.NO_COMMENT.value]
+        return ReplyKeyboardBuilderFactory.build_keyboard(buttons, adjust=[1])
+
+    @staticmethod
+    def create_cancel_swap_keyboard():
+        buttons = [MainMenuButtons.CANCEL.value]
+        return ReplyKeyboardBuilderFactory().build_keyboard(buttons)
 
 
 class InlineKeyboardBuilderFactory:
@@ -52,8 +62,9 @@ class InlineKeyboardBuilderFactory:
             buttons.append((QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"))
         else:
             buttons.append((QueueInlineButtons.EXIT_QUEUE.value, f"queue_control:exit:{queue_id}"))
-    
+
         buttons.append((QueueInlineButtons.SKIP_QUEUE.value, f"queue_control:skip:{queue_id}"))
+        buttons.append((QueueInlineButtons.SWAP_QUEUE.value, f"queue_control:swap:{queue_id}:{user_id}"))
     
         if user_id in room_members_admin_ids:
             buttons.append((QueueInlineButtons.SETTINGS_QUEUE.value, f"queue_admin:settings:{queue_id}"))
@@ -133,3 +144,12 @@ class InlineKeyboardBuilderFactory:
         ]
 
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1, 1])
+
+    @staticmethod
+    def create_acceptance_swap_keyboard(queue_id: int, pos_to: int):
+        buttons = [
+            (SwapInlineButtons.DECLINE.value, f"swap:decline:{queue_id}:{pos_to}"),
+            (SwapInlineButtons.ACCEPT.value, f"swap:accept:{queue_id}:{pos_to}")
+        ]
+
+        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2])

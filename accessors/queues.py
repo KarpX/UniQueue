@@ -67,3 +67,26 @@ async def swap_users_in_queue(session, queue_id: int, user_id_1: int, user_id_2:
     entries[0].position, entries[1].position = entries[1].position, entries[0].position
     
     return True
+
+async def get_entry_by_position(queue_id: int, position: int, user_id: int | None = None):
+    async with async_session() as session:
+        qs = select(QueueEntry).options(selectinload(QueueEntry.user)).filter(QueueEntry.queue_id == queue_id, QueueEntry.position == position)
+
+        if user_id:
+            qs = qs.filter(QueueEntry.user_id != user_id)
+
+        result = await session.execute(qs)
+
+        entry = result.scalar_one_or_none()
+
+        return entry
+
+async def get_entry_by_user_id(queue_id: int, user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueEntry)
+            .options(selectinload(QueueEntry.queue))
+            .filter(QueueEntry.queue_id == queue_id, QueueEntry.user_id == user_id)
+        )
+        entry = result.scalar_one_or_none()
+        return entry
