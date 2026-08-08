@@ -30,7 +30,9 @@ class RoomModel(BaseModel):
     invite_code: Mapped[str] = mapped_column(String, unique=True, index=True)
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
-    queues: Mapped[list["QueueModel"]] = relationship(back_populates="room")
+    queues: Mapped[list["QueueModel"]] = relationship(
+        back_populates="room",
+        cascade="all, delete-orphan")
     members: Mapped[list["RoomMember"]] = relationship(
         back_populates="room", 
         cascade="all, delete-orphan" 
@@ -45,7 +47,7 @@ class QueueModel(BaseModel):
     __tablename__ = "queues"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    room_id: Mapped[int] = mapped_column(ForeignKey("rooms.id"), nullable=False)
+    room_id: Mapped[int] = mapped_column(ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String)
 
     room: Mapped["RoomModel"] = relationship(back_populates="queues")
@@ -69,7 +71,7 @@ class QueueEntry(BaseModel):
     __tablename__ = "queue_entries"
     
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    queue_id: Mapped[int] = mapped_column(ForeignKey("queues.id"))
+    queue_id: Mapped[int] = mapped_column(ForeignKey("queues.id", ondelete="CASCADE"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     position: Mapped[int] = mapped_column(Integer)
     joined_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)

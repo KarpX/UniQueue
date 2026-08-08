@@ -2,6 +2,7 @@ from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
 from accessors.users import get_or_create_user
 from accessors.rooms import (
     get_room_by_name_and_creator,
+    get_room_member,
     get_rooms_for_user,
     get_room_by_id,
     get_members_of_room,
@@ -11,22 +12,25 @@ from database.session import async_session
 from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 from database.models import QueueEntry, RoomMember, RoomModel, UserModel, UserRole, QueueModel
-from enums import MainMenuButtons
-from aiogram import F
+from enums import MEMBERS_PER_PAGE, MainMenuButtons
+from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-from main import CreateQueueState, CreateRoomState, JoinRoomState
+from states import CreateQueueState, CreateRoomState, JoinRoomState
 
 
+router = Router()
+
+@router.message(F.text == MainMenuButtons.CREATE_ROOM.value)
 async def create_room_command(message, state: FSMContext):
     await state.set_state(CreateRoomState.waiting_for_room_name)
-    await message.answer(
+    return await message.answer(
         "Введите название комнаты:",
         reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
     )
 
-
+@router.message(CreateRoomState.waiting_for_room_name)
 async def process_room_name(message, state: FSMContext):
     room_name = message.text
     if room_name == MainMenuButtons.CANCEL.value:
@@ -53,12 +57,12 @@ async def process_room_name(message, state: FSMContext):
     room = await create_room_with_unique_code(room_name, user.id)
 
     await state.clear()
-    await message.answer(
+    return await message.answer(
         f"Комната '{room.name}' успешно создана!",
         reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
     )
 
-
+@router.message(F.text == MainMenuButtons.USER_ROOMS.value)
 async def user_rooms_command(message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     rooms = await get_rooms_for_user(user.id)
@@ -70,7 +74,7 @@ async def user_rooms_command(message):
         )
         return
 
-    await message.answer(
+    return await message.answer(
         f"Ваши комнаты:\n",
         reply_markup=InlineKeyboardBuilderFactory().build_inline_keyboard(
             [(room.name, f"room:{room.id}") for room in rooms], 
@@ -78,7 +82,7 @@ async def user_rooms_command(message):
             parse_mode="HTML"
     )
 
-
+@router.callback_query(F.data.startswith("room:"))
 async def room_callback(callback_query: CallbackQuery):
     room_id = int(callback_query.data.split(":")[1])
     room = await get_room_by_id(room_id)
@@ -87,24 +91,24 @@ async def room_callback(callback_query: CallbackQuery):
         room_member = await session.get(RoomMember, (user.id, room.id))
 
     if not room_member:
-        await callback_query.message.answer(
+        await callback_query.answer(
             "Вы не состоите в этой комнате",
-            reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+            show_alert=True
         )
-        return
+        return await callback_query.message.delete()
 
     user_role = room_member.role.value
     text = (f"Комната: <b>{room.name}</b>\n"
             f"Ваша роль: <b>{'Админ' if user_role == UserRole.ADMIN.value else 'Участник'}</b>\n")
     if user_role == UserRole.ADMIN.value:
         text += f"Код приглашения: <code>{room.invite_code}</code>"
-    await callback_query.message.edit_text(
+    return await callback_query.message.edit_text(
         text,
         reply_markup=InlineKeyboardBuilderFactory().room_inline_keyboard(user_role, room_id=room.id),
         parse_mode="HTML"
     )
 
-
+@router.callback_query(F.data == "back")
 async def back_rooms(callback_query: CallbackQuery):
     user = await get_or_create_user(callback_query.from_user.id, callback_query.from_user.username)
     rooms = await get_rooms_for_user(user.id)
@@ -116,14 +120,14 @@ async def back_rooms(callback_query: CallbackQuery):
         )
         return
 
-    await callback_query.message.edit_text(
+    return await callback_query.message.edit_text(
         "Ваши комнаты:",
         reply_markup=InlineKeyboardBuilderFactory().build_inline_keyboard(
             [(room.name, f"room:{room.id}") for room in rooms], 
             adjust=[2] * len(rooms))
     )
 
-
+@router.callback_query(F.data.startswith("leave_room:"))
 async def leave_room(callback_query: CallbackQuery):
     room_id = int(callback_query.data.split(":")[1])
     user_id = callback_query.from_user.id
@@ -180,15 +184,13 @@ async def leave_room(callback_query: CallbackQuery):
             if new_admin:
                 new_admin.role = UserRole.ADMIN
 
-        
-
         await session.delete(room_member)
         await session.commit()
 
     await callback_query.message.delete()
-    await callback_query.message.answer(f'Вы покинули комнату "{room.name}"')
-
-
+    return await callback_query.message.answer(f'Вы покинули комнату "{room.name}"')
+@router.callback_query(F.data.startswith("member_back:"))
+@router.callback_query(F.data.startswith("room_settings:"))
 async def room_settings_callback(callback_query: CallbackQuery, state: FSMContext):
     parts = callback_query.data.split(":")
     action = parts[1]
@@ -206,28 +208,36 @@ async def room_settings_callback(callback_query: CallbackQuery, state: FSMContex
     if action == "create_queue":
         await state.set_state(CreateQueueState.waiting_for_queue_name)
         await state.update_data(room_id=room_id)
-        await callback_query.message.answer(
+        return await callback_query.message.answer(
             "Введите название очереди:",
             reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
         )
     elif action == "settings":
-        await callback_query.message.answer(f"Настройки комнаты '{room.name}' (функционал не реализован)")
+        return await callback_query.message.answer(f"Настройки комнаты '{room.name}' (функционал не реализован)")
     elif action == "members":
-        members = await get_members_of_room(room.id)
-        member_list = "\n".join([f"- @{member.username or 'User'} (ID: {member.id})" for member in members])
-        await callback_query.message.answer(
-            f"Участники комнаты '{room.name}':\n{member_list}"
+        members = await get_room_member(room_id, except_user_id=user.id)
+        page = 0
+        items_per_page = MEMBERS_PER_PAGE
+
+        start = page * items_per_page
+        end = start + items_per_page
+        members_to_show = members[start:end]
+
+        return await callback_query.message.edit_text(
+            f'Участники комнаты <b>{room.name}</b>:',
+            reply_markup=InlineKeyboardBuilderFactory.room_members_keyboard(members_to_show, room_id, 0, len(members), items_per_page),
+            parse_mode="HTML"
         )
 
-
+@router.message(F.text == MainMenuButtons.JOIN_ROOM.value)
 async def join_room_command(message, state: FSMContext):
     await state.set_state(JoinRoomState.waiting_for_invite_code)
-    await message.answer(
+    return await message.answer(
         "Введите код приглашения комнаты:",
         reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
     )
 
-
+@router.message(JoinRoomState.waiting_for_invite_code)
 async def process_invite_code(message, state: FSMContext):
     invite_code = message.text
     if invite_code == MainMenuButtons.CANCEL.value:
@@ -268,17 +278,22 @@ async def process_invite_code(message, state: FSMContext):
         await session.commit()
 
     await state.clear()
-    await message.answer(
+    return await message.answer(
         f"Вы успешно присоединились к комнате '{room.name}'!",
         reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
     )
 
-
-async def queue_callback(callback_query: CallbackQuery):
-    room_id = int(callback_query.data.split(":")[1])
+@router.callback_query(F.data.startswith("queue:"))
+async def queue_callback(callback_query: CallbackQuery, room_id: int | None = None):
+    if not room_id:
+        room_id = int(callback_query.data.split(":")[1])
+    
+    user_id = callback_query.message.from_user.id
     async with async_session() as session:
         result = await session.execute(
-            select(RoomModel).filter(RoomModel.id == room_id)
+            select(RoomModel)
+            .options(selectinload(RoomModel.members))
+            .filter(RoomModel.id == room_id)
         )
         room = result.scalar_one_or_none()
 
@@ -287,15 +302,23 @@ async def queue_callback(callback_query: CallbackQuery):
         )
         queues = queue_res.scalars().all()
 
+    room_users_ids = [member.user_id for member in room.members]
     if not room:
-        return await callback_query.message.answer(
-            "Такая комната не существует"
+        return await callback_query.answer(
+            "Такая комната не существует",
+            show_alert=True
+        )
+
+    if user_id and user_id in room_users_ids:
+        return await callback_query.answer(
+            "Вы не участник комнаты",
+            show_alert=True
         )
 
     buttons = [(queue.name, f"open_queue:{queue.id}") for queue in queues]
     buttons += [("Назад", f"room:{room.id}")]
     
-    await callback_query.message.edit_text(
+    return await callback_query.message.edit_text(
         f"Очереди в комнате <b>{room.name}</b>",
         reply_markup=InlineKeyboardBuilderFactory().build_inline_keyboard(
             buttons, 
@@ -303,5 +326,28 @@ async def queue_callback(callback_query: CallbackQuery):
         parse_mode="HTML"
     )
 
+@router.callback_query(F.data.startswith("mem:list:"))
+async def process_member_list(callback_query: CallbackQuery):
+    _, _, room_id, _, page = callback_query.data.split(":")
+    room_id = int(room_id)
+    page = int(page)
+
+    room = await get_room_by_id(room_id)
+    members = await get_room_member(room_id)
+    items_per_page = MEMBERS_PER_PAGE
+
+    start = page * items_per_page
+    end = start + items_per_page
+    members_to_show = members[start:end]
+
+    return await callback_query.message.edit_text(
+        f'Участники комнаты <b>{room.name}</b>:',
+        reply_markup=InlineKeyboardBuilderFactory.room_members_keyboard(members_to_show, room_id, page, len(members), items_per_page),
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data.startswith("room_view:"))
+async def process_room_view(callback_query: CallbackQuery):
+    return await room_callback(callback_query)
 
 # End of rooms handlers
