@@ -142,3 +142,26 @@ async def delete_room(room_id: int):
         await session.commit()
 
     return True
+
+async def join_room_with_unicode(user_id: int, invite_code: str):
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomModel)
+            .filter(RoomModel.invite_code == invite_code)
+        )
+        room = result.scalar_one_or_none()
+
+        if not room:
+            return "not_found", None
+
+        room_member_qs = select(RoomMember).filter(RoomMember.room_id == room.id, RoomMember.user_id == user_id)
+        exsisting_member_res = await session.execute(room_member_qs)
+        exsisting_member = exsisting_member_res.scalar_one_or_none()
+
+        if exsisting_member:
+            return "already_in", None
+
+        room_member = RoomMember(room_id=room.id, user_id=user_id)
+        session.add(room_member)
+        await session.commit()
+        return "success", room

@@ -9,6 +9,7 @@ from accessors.rooms import (
     get_rooms_for_user,
     get_room_by_id,
     get_members_of_room,
+    join_room_with_unicode,
 )
 from accessors.queues import get_queues_by_room, reindex_queue
 from database.session import async_session
@@ -19,6 +20,7 @@ from enums import MEMBERS_PER_PAGE, MainMenuButtons
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
+from main import bot
 
 from states import CreateQueueState, CreateRoomState, JoinRoomState
 
@@ -102,11 +104,15 @@ async def room_callback(callback_query: CallbackQuery):
         )
         return await callback_query.message.delete()
 
+    bot_info = await bot.get_me()
+    invite_link = f"https://t.me/{bot_info.username}?start={room.invite_code}"
+
     user_role = room_member.role.value
     text = (f"Комната: <b>{room.name}</b>\n"
             f"Ваша роль: <b>{'Админ' if user_role == UserRole.ADMIN.value else 'Участник'}</b>\n")
     if user_role == UserRole.ADMIN.value:
-        text += f"Код приглашения: <code>{room.invite_code}</code>"
+        text += f"Код приглашения: <code>{room.invite_code}</code>\n"
+        text += f"Пригалсительая ссылка:\n{invite_link}"
     return await callback_query.message.edit_text(
         text,
         reply_markup=InlineKeyboardBuilderFactory().room_inline_keyboard(user_role, room_id=room.id),
@@ -220,7 +226,7 @@ async def room_settings_callback(callback_query: CallbackQuery, state: FSMContex
         )
     elif action == "settings":
         return await room_settings_handle(callback_query, room_id)
-    elif action == "members":
+    elif action in ("members", "kick_member"):
         members = await get_room_member(room_id, except_user_id=user.id)
         page = 0
         items_per_page = MEMBERS_PER_PAGE
@@ -428,5 +434,30 @@ async def process_member_list(callback_query: CallbackQuery):
 @router.callback_query(F.data.startswith("room_view:"))
 async def process_room_view(callback_query: CallbackQuery):
     return await room_callback(callback_query)
+
+async def join_room_by_link(message: Message, user_id: int, invite_code: str):
+    user = await get_or_create_user(user_id)
+    if not user:
+        return await message.answer("Пользователь не найден")
+
+    result, room = await join_room_with_unicode(user.id, invite_code)
+
+    if not room:
+        if result == "not_found":
+            return await message.answer(
+                "Комната не найдена",
+                reply_markup=ReplyKeyboardBuilderFactory.create_main_menu_keyboard()
+            )
+        elif result == "already_in":
+            return await message.answer(
+                "Вы уже состоите в этой комнате",
+                reply_markup=ReplyKeyboardBuilderFactory.create_main_menu_keyboard()
+            )
+
+    return await message.answer(
+        f"Вы успешно присоединились к комнате <b>{room.name}</b>",
+        reply_markup=ReplyKeyboardBuilderFactory.create_main_menu_keyboard(),
+        parse_mode="HTML"
+    )
 
 # End of rooms handlers
