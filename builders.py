@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardButton, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from database.models import UserRole
-from enums import MainMenuButtons, QueueInlineButtons, RoomInlineButtons
+from enums import MainMenuButtons, MemberInlineButtons, QueueInlineButtons, RoomInlineButtons
 
 
 class ReplyKeyboardBuilderFactory:
@@ -108,3 +108,18 @@ class InlineKeyboardBuilderFactory:
         adjust.append(1)
 
         return InlineKeyboardBuilderFactory.build_inline_keyboard(buttons, adjust=adjust)
+
+    @staticmethod
+    def member_settings_keyboard(room_id: int, user_id: int, role):
+        buttons = []
+
+        if role == UserRole.MEMBER:
+            buttons.append((MemberInlineButtons.MAKE_ADMIN.value, f"member_settings:make_admin:{room_id}:{user_id}"))
+
+        else:
+            buttons.append((MemberInlineButtons.MAKE_MEMBER.value, f"member_settings:make_member:{room_id}:{user_id}"))
+
+        buttons.append((MemberInlineButtons.KICK_MEMBER.value, f"member_settings:kick_member:{room_id}:{user_id}"))
+        buttons.append((MemberInlineButtons.BACK_MEMBER, f"member_back:members:{room_id}:{user_id}"))
+
+        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1, 1])

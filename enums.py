@@ -32,4 +32,11 @@ class QueueInlineButtons(Enum):
     RENAME_QUEUE = "Переименовать"
     DELETE_QUEUE = "Удалить"
 
+
+class MemberInlineButtons(Enum):
+    MAKE_ADMIN = "👑 Сделать админом"
+    MAKE_MEMBER = "👤 Разжаловать"
+    KICK_MEMBER = "❌ Исключить из группы"
+    BACK_MEMBER = "⬅️ Назад"
+
     

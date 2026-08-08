@@ -35,17 +35,30 @@ async def get_members_of_room(room_id: int) -> list[UserModel]:
         )
         return result.scalars().all()
 
-async def get_room_member(room_id: int):
+async def get_room_member(room_id: int, except_user_id: int | None = None):
     async with async_session() as session:
-        result = await session.execute(
-            select(RoomMember)
-            .options(selectinload(RoomMember.user))
-            .filter(RoomMember.room_id == room_id)
-        )
+        stmt = (select(RoomMember)
+                    .options(selectinload(RoomMember.user))
+                    .filter(RoomMember.room_id == room_id))
+
+        if except_user_id:
+            stmt = stmt.filter(RoomMember.user_id != except_user_id)
+
+        result = await session.execute(stmt)
         members = result.scalars().all()
 
         return members
 
+async def get_room_member_by_user_id(room_id: int, user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomMember)
+            .options(selectinload(RoomMember.user))
+            .filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id)
+        )
+        member = result.scalar_one_or_none()
+
+        return member
 
 async def create_room_with_unique_code(room_name: str, creator_id: int) -> RoomModel:
     import secrets
@@ -82,3 +95,35 @@ async def get_room_with_queue(queue_id: int):
         room_res = room.scalar_one_or_none()
 
         return room_res
+
+async def change_member_role(room_id: int, user_id: int, role):
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomMember)
+            .filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id)
+        )
+        member = result.scalar_one_or_none()
+
+        if not member or member.role == role:
+            return False
+        
+        member.role = role
+        await session.commit()
+        return True
+
+async def delete_room_member(room_id: int, user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomMember)
+            .filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id)
+        )
+        member = result.scalar_one_or_none()
+
+        if member is None:
+            return None
+        
+        await session.delete(member)
+        await session.commit()
+
+    return True
+            
