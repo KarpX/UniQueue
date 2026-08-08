@@ -8,13 +8,14 @@ from database.models import QueueModel, QueueEntry, UserModel, RoomMember, UserR
 from sqlalchemy import delete, select
 from enums import QueueInlineButtons, MainMenuButtons
 from aiogram.types import CallbackQuery
-from aiogram import F
+from aiogram import F, Router
 import logging
 
 from states import CreateQueueState
 
 logger = logging.getLogger(__name__)
 
+router = Router()
 
 async def generate_queue_message(user_id: int, queue: QueueModel):
     text_lines = [f"Очередь <b>{queue.name}</b>", ""]
@@ -39,7 +40,7 @@ async def generate_queue_message(user_id: int, queue: QueueModel):
     
     return "\n".join(text_lines), keyboard
 
-
+@router.message(CreateQueueState.waiting_for_queue_name)
 async def process_queue_name(message, state):
     queue_name = message.text
     room_id = (await state.get_data()).get("room_id")
@@ -76,7 +77,8 @@ async def process_queue_name(message, state):
         reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
     )
 
-
+@router.callback_query(F.data.startswith("queue_back:"))
+@router.callback_query(F.data.startswith("open_queue:"))
 async def open_queue_callback(callback_query: CallbackQuery):
     queue_id = int(callback_query.data.split(":")[1])
     async with async_session() as session:
@@ -93,7 +95,7 @@ async def open_queue_callback(callback_query: CallbackQuery):
     )
     return await callback_query.answer()
 
-
+@router.callback_query(F.data.startswith("queue_control:"))
 async def queue_control_handler(callback_query: CallbackQuery):
     data = callback_query.data.split(":")
     command, queue_id = data[1], int(data[2])
@@ -190,6 +192,7 @@ async def queue_control_handler(callback_query: CallbackQuery):
         logger.info("Ошибка при изменении сообщения очереди")
         pass
 
+@router.callback_query(F.data.startswith("queue_admin:"))
 async def queue_admin_handler(callback_query: CallbackQuery, state: FSMContext):
     method = callback_query.data.split(":")[1]
     queue_id = callback_query.data.split(":")[2]
@@ -226,6 +229,7 @@ async def queue_delete_handler(callback_query: CallbackQuery, state: FSMContext)
 
     return await queue_callback(callback_query, room_id)
 
+@router.message(CreateQueueState.waiting_for_queue_rename)
 async def queue_rename_text_handler(message, state: FSMContext):
     queue_name = message.text
     queue_id = (await state.get_data()).get("queue_id")
@@ -269,6 +273,7 @@ async def queue_rename_handler(callback_query: CallbackQuery, state: FSMContext)
         "Введите новое название очереди:",
         reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
     )
+
 
 async def queue_back_hanlder(callback_query: CallbackQuery):
     return await open_queue_callback(callback_query)

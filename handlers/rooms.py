@@ -20,6 +20,9 @@ from aiogram.fsm.context import FSMContext
 from states import CreateQueueState, CreateRoomState, JoinRoomState
 
 
+router = Router()
+
+@router.message(F.text == MainMenuButtons.CREATE_ROOM.value)
 async def create_room_command(message, state: FSMContext):
     await state.set_state(CreateRoomState.waiting_for_room_name)
     return await message.answer(
@@ -27,7 +30,7 @@ async def create_room_command(message, state: FSMContext):
         reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
     )
 
-
+@router.message(CreateRoomState.waiting_for_room_name)
 async def process_room_name(message, state: FSMContext):
     room_name = message.text
     if room_name == MainMenuButtons.CANCEL.value:
@@ -59,7 +62,7 @@ async def process_room_name(message, state: FSMContext):
         reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
     )
 
-
+@router.message(F.text == MainMenuButtons.USER_ROOMS.value)
 async def user_rooms_command(message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     rooms = await get_rooms_for_user(user.id)
@@ -79,7 +82,7 @@ async def user_rooms_command(message):
             parse_mode="HTML"
     )
 
-
+@router.callback_query(F.data.startswith("room:"))
 async def room_callback(callback_query: CallbackQuery):
     room_id = int(callback_query.data.split(":")[1])
     room = await get_room_by_id(room_id)
@@ -105,7 +108,7 @@ async def room_callback(callback_query: CallbackQuery):
         parse_mode="HTML"
     )
 
-
+@router.callback_query(F.data == "back")
 async def back_rooms(callback_query: CallbackQuery):
     user = await get_or_create_user(callback_query.from_user.id, callback_query.from_user.username)
     rooms = await get_rooms_for_user(user.id)
@@ -124,7 +127,7 @@ async def back_rooms(callback_query: CallbackQuery):
             adjust=[2] * len(rooms))
     )
 
-
+@router.callback_query(F.data.startswith("leave_room:"))
 async def leave_room(callback_query: CallbackQuery):
     room_id = int(callback_query.data.split(":")[1])
     user_id = callback_query.from_user.id
@@ -186,8 +189,8 @@ async def leave_room(callback_query: CallbackQuery):
 
     await callback_query.message.delete()
     return await callback_query.message.answer(f'Вы покинули комнату "{room.name}"')
-
-
+@router.callback_query(F.data.startswith("member_back:"))
+@router.callback_query(F.data.startswith("room_settings:"))
 async def room_settings_callback(callback_query: CallbackQuery, state: FSMContext):
     parts = callback_query.data.split(":")
     action = parts[1]
@@ -212,7 +215,7 @@ async def room_settings_callback(callback_query: CallbackQuery, state: FSMContex
     elif action == "settings":
         return await callback_query.message.answer(f"Настройки комнаты '{room.name}' (функционал не реализован)")
     elif action == "members":
-        members = await get_room_member(room_id)
+        members = await get_room_member(room_id, except_user_id=user.id)
         page = 0
         items_per_page = MEMBERS_PER_PAGE
 
@@ -226,7 +229,7 @@ async def room_settings_callback(callback_query: CallbackQuery, state: FSMContex
             parse_mode="HTML"
         )
 
-
+@router.message(F.text == MainMenuButtons.JOIN_ROOM.value)
 async def join_room_command(message, state: FSMContext):
     await state.set_state(JoinRoomState.waiting_for_invite_code)
     return await message.answer(
@@ -234,7 +237,7 @@ async def join_room_command(message, state: FSMContext):
         reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
     )
 
-
+@router.message(JoinRoomState.waiting_for_invite_code)
 async def process_invite_code(message, state: FSMContext):
     invite_code = message.text
     if invite_code == MainMenuButtons.CANCEL.value:
@@ -280,7 +283,7 @@ async def process_invite_code(message, state: FSMContext):
         reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
     )
 
-
+@router.callback_query(F.data.startswith("queue:"))
 async def queue_callback(callback_query: CallbackQuery, room_id: int | None = None):
     if not room_id:
         room_id = int(callback_query.data.split(":")[1])
@@ -323,6 +326,7 @@ async def queue_callback(callback_query: CallbackQuery, room_id: int | None = No
         parse_mode="HTML"
     )
 
+@router.callback_query(F.data.startswith("mem:list:"))
 async def process_member_list(callback_query: CallbackQuery):
     _, _, room_id, _, page = callback_query.data.split(":")
     room_id = int(room_id)
@@ -342,6 +346,7 @@ async def process_member_list(callback_query: CallbackQuery):
         parse_mode="HTML"
     )
 
+@router.callback_query(F.data.startswith("room_view:"))
 async def process_room_view(callback_query: CallbackQuery):
     return await room_callback(callback_query)
 
