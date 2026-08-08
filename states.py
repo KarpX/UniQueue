@@ -3,6 +3,7 @@ from aiogram.fsm.state import StatesGroup, State
 
 class CreateRoomState(StatesGroup):
     waiting_for_room_name = State()
+    waiting_for_room_rename = State()
 
 
 class JoinRoomState(StatesGroup):

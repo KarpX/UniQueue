@@ -250,7 +250,7 @@ async def queue_rename_text_handler(message, state: FSMContext):
 
         if not queue:
             await message.answer(
-                "Комната не существует",
+                "Очередь не существует",
                 reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
             )
             await state.clear()
@@ -261,8 +261,9 @@ async def queue_rename_text_handler(message, state: FSMContext):
 
     await state.clear()
     return await message.answer(
-        f"Очередь '{queue.name}' успешно переименована!",
-        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+        f"Очередь <b>{queue.name}</b> успешно переименована!",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
     )
 
 async def queue_rename_handler(callback_query: CallbackQuery, state: FSMContext):

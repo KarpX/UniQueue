@@ -126,4 +126,19 @@ async def delete_room_member(room_id: int, user_id: int):
         await session.commit()
 
     return True
-            
+
+async def delete_room(room_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomModel)
+            .filter(RoomModel.id == room_id)
+        )
+        room = result.scalar_one_or_none()
+
+        if room is None:
+            return False
+        
+        await session.delete(room)
+        await session.commit()
+
+    return True

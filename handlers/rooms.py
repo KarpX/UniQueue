@@ -1,6 +1,9 @@
+import logging
+
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
 from accessors.users import get_or_create_user
 from accessors.rooms import (
+    delete_room,
     get_room_by_name_and_creator,
     get_room_member,
     get_rooms_for_user,
@@ -14,11 +17,13 @@ from sqlalchemy.orm import selectinload
 from database.models import QueueEntry, RoomMember, RoomModel, UserModel, UserRole, QueueModel
 from enums import MEMBERS_PER_PAGE, MainMenuButtons
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
 from states import CreateQueueState, CreateRoomState, JoinRoomState
 
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -189,6 +194,7 @@ async def leave_room(callback_query: CallbackQuery):
 
     await callback_query.message.delete()
     return await callback_query.message.answer(f'Вы покинули комнату "{room.name}"')
+
 @router.callback_query(F.data.startswith("member_back:"))
 @router.callback_query(F.data.startswith("room_settings:"))
 async def room_settings_callback(callback_query: CallbackQuery, state: FSMContext):
@@ -213,7 +219,7 @@ async def room_settings_callback(callback_query: CallbackQuery, state: FSMContex
             reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
         )
     elif action == "settings":
-        return await callback_query.message.answer(f"Настройки комнаты '{room.name}' (функционал не реализован)")
+        return await room_settings_handle(callback_query, room_id)
     elif action == "members":
         members = await get_room_member(room_id, except_user_id=user.id)
         page = 0
@@ -228,6 +234,79 @@ async def room_settings_callback(callback_query: CallbackQuery, state: FSMContex
             reply_markup=InlineKeyboardBuilderFactory.room_members_keyboard(members_to_show, room_id, 0, len(members), items_per_page),
             parse_mode="HTML"
         )
+
+async def room_settings_handle(callback_query: CallbackQuery, room_id: int):
+    room = await get_room_by_id(room_id)
+    return await callback_query.message.edit_text(
+        f"Настройка комнаты <b>{room.name}</b>",
+        reply_markup=InlineKeyboardBuilderFactory.room_settings_keyboard(room_id),
+        parse_mode="HTML" 
+    )
+
+@router.callback_query(F.data.startswith("room_admin_settings:"))
+async def room_settings_callback_handler(callback_query: CallbackQuery, state: FSMContext):
+    action = callback_query.data.split(":")[1]
+    room_id = int(callback_query.data.split(":")[2])
+    logger.info(f"ROOM_ID: {room_id}")
+    if action == "rename":
+        await rename_room(callback_query, room_id, state)
+    elif action == "delete":
+        await delete_room_handler(callback_query, room_id)
+
+async def delete_room_handler(callback_query: CallbackQuery, room_id: int):
+    success = await delete_room(room_id)
+
+    if not success:
+        return await callback_query.answer("Ошибка при удалении комнаты", show_alert=True)
+
+    await callback_query.answer("Комната удалена")
+    await callback_query.message.delete()
+
+async def rename_room(callback_query: CallbackQuery, room_id: int, state: FSMContext):
+    await state.set_state(CreateRoomState.waiting_for_room_rename)
+    await state.update_data(room_id=room_id)
+    return await callback_query.message.answer(
+        "Введите новое название комнаты",
+        reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
+    )
+
+@router.message(CreateRoomState.waiting_for_room_rename)
+async def rename_room_text_handler(message: Message, state: FSMContext):
+    room_name = message.text
+    room_id = (await state.get_data()).get("room_id")
+
+    if room_name == MainMenuButtons.CANCEL.value:
+        await state.clear()
+        await message.answer(
+            "Переименование комнаты отменено",
+            reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+        )
+        return
+
+    async with async_session() as session:
+            result = await session.execute(
+                select(RoomModel)
+                .filter(RoomModel.id == room_id)
+            )
+            room = result.scalar_one_or_none()
+    
+            if not room:
+                await message.answer(
+                    "Комната не существует",
+                    reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+                )
+                await state.clear()
+                return
+    
+            room.name = room_name
+            await session.commit()
+    
+    await state.clear()
+    return await message.answer(
+        f"Комната <b>{room.name}</b> успешно переименована!",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
+    )
 
 @router.message(F.text == MainMenuButtons.JOIN_ROOM.value)
 async def join_room_command(message, state: FSMContext):
