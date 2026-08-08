@@ -72,4 +72,39 @@ class InlineKeyboardBuilderFactory:
 
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1])
 
+    @staticmethod
+    def room_members_keyboard(room_members, room_id: int, page: int, total_count: int, items_per_page: int):
+        buttons = []
+        adjust = []
 
+        for member in room_members:
+            name_label = member.user.username or f"ID: {member.user_id}"
+            role_icon = "👑 " if member.role == UserRole.ADMIN else "👤 "
+            
+            buttons.append((
+                f"{role_icon}{name_label}", 
+                f"mem:view:{room_id}:{member.user_id}:{page}"
+            ))
+            adjust.append(1)
+
+        if total_count > items_per_page:
+            nav_buttons_count = 0
+            
+            if page > 0:
+                buttons.append(("⬅️", f"mem:list:{room_id}:0:{page - 1}"))
+                nav_buttons_count += 1
+            
+            total_pages = (total_count - 1) // items_per_page + 1
+            buttons.append((f"{page + 1} / {total_pages}", "noop"))
+            nav_buttons_count += 1
+
+            if (page + 1) * items_per_page < total_count:
+                buttons.append(("➡️", f"mem:list:{room_id}:0:{page + 1}"))
+                nav_buttons_count += 1
+            
+            adjust.append(nav_buttons_count)
+
+        buttons.append(("⬅️ Назад в меню", f"room_view:{room_id}"))
+        adjust.append(1)
+
+        return InlineKeyboardBuilderFactory.build_inline_keyboard(buttons, adjust=adjust)

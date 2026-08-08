@@ -52,3 +52,18 @@ async def delete_queue(queue_id: int):
         await session.commit()
 
         return queue.room_id
+
+async def swap_users_in_queue(session, queue_id: int, user_id_1: int, user_id_2: int):
+    stmt = select(QueueEntry).filter(
+        QueueEntry.queue_id == queue_id,
+        QueueEntry.user_id.in_([user_id_1, user_id_2])
+    )
+    result = await session.execute(stmt)
+    entries = result.scalars().all()
+
+    if len(entries) != 2:
+        return False
+
+    entries[0].position, entries[1].position = entries[1].position, entries[0].position
+    
+    return True

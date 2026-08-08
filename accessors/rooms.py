@@ -1,3 +1,6 @@
+import secrets
+import string
+
 from database.session import async_session
 from database.models import QueueModel, RoomModel, RoomMember, UserModel, UserRole
 from sqlalchemy import select
@@ -31,6 +34,17 @@ async def get_members_of_room(room_id: int) -> list[UserModel]:
             select(UserModel).join(RoomMember).filter(RoomMember.room_id == room_id)
         )
         return result.scalars().all()
+
+async def get_room_member(room_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomMember)
+            .options(selectinload(RoomMember.user))
+            .filter(RoomMember.room_id == room_id)
+        )
+        members = result.scalars().all()
+
+        return members
 
 
 async def create_room_with_unique_code(room_name: str, creator_id: int) -> RoomModel:

@@ -93,6 +93,14 @@ async def queue_callback(callback_query: CallbackQuery):
 async def process_queue_name(message, state: FSMContext):
     await handlers_queues.process_queue_name(message, state)
 
+@dp.callback_query(F.data.startswith("mem:list:"))
+async def process_member_list(callback_query: CallbackQuery):
+    await handlers_rooms.process_member_list(callback_query)
+
+@dp.callback_query(F.data.startswith("room_view:"))
+async def process_room_view(callback_query: CallbackQuery):
+    await handlers_rooms.process_room_view(callback_query)
+
 # -------------- Join Room Command --------------
 
 @dp.message(F.text == MainMenuButtons.JOIN_ROOM.value)
@@ -114,11 +122,9 @@ async def generate_queue_message(user_id: int, queue: QueueModel):
 async def open_queue_callback(callback_query: CallbackQuery):
     await handlers_queues.open_queue_callback(callback_query)
 
-
 @dp.callback_query(F.data.startswith("queue_control:"))
 async def queue_control_handler(callback_query: CallbackQuery):
     await handlers_queues.queue_control_handler(callback_query)
-
 
 @dp.callback_query(F.data.startswith("queue_admin:"))
 async def queue_settings_handler(callback_query: CallbackQuery, state: FSMContext):
@@ -131,33 +137,6 @@ async def queue_back_handler(callback_query: CallbackQuery):
 @dp.message(CreateQueueState.waiting_for_queue_rename)
 async def queue_rename_handler(message, state: FSMContext):
     await handlers_queues.queue_rename_text_handler(message, state)
-
-# ----------------- Helper Functions -----------------
-
-
-async def get_room_by_name_and_creator(room_name: str, user_id: int) -> RoomModel | None:
-    async with async_session() as session:
-        result = await session.execute(
-            select(RoomModel).filter_by(name=room_name, creator_id=user_id)
-        )
-        return result.scalar_one_or_none()
-
-
-async def create_room_with_unique_code(session, room_name: str, creator_id: int) -> RoomModel:
-    while True:
-        invite_code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
-        existing_room = await session.execute(
-            select(RoomModel).filter_by(invite_code=invite_code)
-        )
-        if not existing_room.scalar():
-            break
-
-    room = RoomModel(name=room_name, invite_code=invite_code, creator_id=creator_id)
-    room_member = RoomMember(user_id=creator_id, room=room, role=UserRole.ADMIN)
-    session.add(room)
-    session.add(room_member)
-    await session.commit()
-    return room
 
 
 async def main():
