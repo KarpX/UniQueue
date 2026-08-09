@@ -52,6 +52,10 @@ class QueueModel(BaseModel):
 
     room: Mapped["RoomModel"] = relationship(back_populates="queues")
     entries: Mapped[list["QueueEntry"]] = relationship(back_populates="queue", cascade="all, delete-orphan")
+    swap_requests: Mapped[list["SwapRequest"]] = relationship(
+        back_populates="queue", 
+        cascade="all, delete-orphan"
+    )
 
 
 class RoomMember(BaseModel):
@@ -78,3 +82,23 @@ class QueueEntry(BaseModel):
     
     queue: Mapped["QueueModel"] = relationship(back_populates="entries")
     user: Mapped["UserModel"] = relationship()
+
+
+class SwapRequest(BaseModel):
+    __tablename__ = "swap_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    sender_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), 
+        nullable=False
+    )
+    target_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), 
+        nullable=False
+    )
+    queue_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("queues.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    queue: Mapped["QueueModel"] = relationship()
+    sender: Mapped["UserModel"] = relationship(foreign_keys=[sender_id])
+    target: Mapped["UserModel"] = relationship(foreign_keys=[target_id])

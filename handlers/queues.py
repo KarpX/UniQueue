@@ -1,17 +1,17 @@
 from accessors.rooms import get_room_with_queue
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
-from accessors.queues import delete_queue, get_queue_with_data, reindex_queue, swap_users_in_queue
+from accessors.queues import create_swap_request, delete_queue, delete_swap_request, delete_swap_request_by_users, get_entry_by_position, get_entry_by_user_id, get_entry_with_user_by_user_id, get_queue_with_data, get_swap_request_by_id, has_active_swap_request, reindex_queue, swap_users_in_queue, swap_users_in_queue_by_pos
 from aiogram.fsm.context import FSMContext
-from accessors.users import get_or_create_user
+from accessors.users import get_or_create_user, get_user_by_position
 from database.session import async_session
 from database.models import QueueModel, QueueEntry, UserModel, RoomMember, UserRole
 from sqlalchemy import delete, select
-from enums import QueueInlineButtons, MainMenuButtons
-from aiogram.types import CallbackQuery
-from aiogram import F, Router
+from enums import QueueInlineButtons, MainMenuButtons, SwapInlineButtons, WritingCommentButtons
+from aiogram.types import CallbackQuery, Message
+from aiogram import F, Bot, Router
 import logging
 
-from states import CreateQueueState
+from states import CreateQueueState, SwapEntriesState
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ async def open_queue_callback(callback_query: CallbackQuery):
     return await callback_query.answer()
 
 @router.callback_query(F.data.startswith("queue_control:"))
-async def queue_control_handler(callback_query: CallbackQuery):
+async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext):
     data = callback_query.data.split(":")
     command, queue_id = data[1], int(data[2])
     user_id = callback_query.from_user.id
@@ -177,6 +177,9 @@ async def queue_control_handler(callback_query: CallbackQuery):
             else:
                 await callback_query.answer("Не удалось выполнить пропуск")
 
+        elif command == "swap":
+            return await swap_entries_handler(callback_query, state, user_id, queue_id)
+
         await session.commit()
         
         updated_queue = await get_queue_with_data(session, queue_id)
@@ -250,7 +253,7 @@ async def queue_rename_text_handler(message, state: FSMContext):
 
         if not queue:
             await message.answer(
-                "Комната не существует",
+                "Очередь не существует",
                 reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
             )
             await state.clear()
@@ -261,8 +264,9 @@ async def queue_rename_text_handler(message, state: FSMContext):
 
     await state.clear()
     return await message.answer(
-        f"Очередь '{queue.name}' успешно переименована!",
-        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+        f"Очередь <b>{queue.name}</b> успешно переименована!",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
     )
 
 async def queue_rename_handler(callback_query: CallbackQuery, state: FSMContext):
@@ -274,6 +278,214 @@ async def queue_rename_handler(callback_query: CallbackQuery, state: FSMContext)
         reply_markup=ReplyKeyboardBuilderFactory().build_keyboard([MainMenuButtons.CANCEL.value])
     )
 
+async def swap_entries_handler(callback_query: CallbackQuery, state: FSMContext, user_id: int, queue_id: int):
+    active_swap_request = await has_active_swap_request(queue_id, user_id)
+    if active_swap_request:
+        if active_swap_request.target_id == user_id:
+            text = (f"У Вас уже есть открытый запрос на смену позиции в очереди <b>{active_swap_request.queue.name}</b>\n"
+                f"Ответьте на запрос от пользователя @{active_swap_request.sender.username} или дождитесь отмены")
+
+            entry_from = await get_entry_with_user_by_user_id(queue_id, active_swap_request.sender_id)
+
+            entry_to = await get_entry_with_user_by_user_id(queue_id, active_swap_request.target_id)
+
+            text += (f"\n\n<b>Запрос поменяться местами</b>\n"
+                        f"Очередь <b>{entry_from.queue.name}</b>\n"
+                        f"Пользователь @{entry_from.user.username} (место {entry_from.position}) хочет поменяться с Вами (место {entry_to.position})")
+
+            return await callback_query.message.answer(
+                text=text,
+                reply_markup=InlineKeyboardBuilderFactory().create_acceptance_swap_keyboard(queue_id, entry_to.position, entry_from.position),
+                parse_mode="HTML"
+            )
+
+        elif active_swap_request.sender_id == user_id:
+            text = (f"У Вас уже есть открытый запрос на смену позиции в очереди <b>{active_swap_request.queue.name}</b>\n"
+                f"Дождитесь ответа от @{active_swap_request.target.username} или отмените его")
+            return await callback_query.message.answer(
+                text=text,
+                reply_markup=InlineKeyboardBuilderFactory().create_cancel_swap_request_keyboard(active_swap_request.id),
+                parse_mode="HTML"
+            )
+        
+    
+    await state.set_state(SwapEntriesState.waiting_postition)
+    await state.update_data(queue_id=queue_id)
+    return await callback_query.message.answer(
+        "Введите номер позиции, на которую Вы хотите встать",
+        reply_markup=ReplyKeyboardBuilderFactory().create_cancel_swap_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("cancel_request:"))
+async def cancel_swap_request_inline_handler(callback_query: CallbackQuery):
+    swap_request_id = int(callback_query.data.split(":")[1])
+    request = await get_swap_request_by_id(swap_request_id)
+
+    if request is None:
+        await callback_query.answer("Запрос не найден")
+        await callback_query.message.delete()
+        return 
+
+    success = await delete_swap_request(swap_request_id)
+
+    logger.info(success)
+
+    if not success:
+        await callback_query.answer("Ошибка при отмене запроса")
+    else:
+        await callback_query.answer("Запрос отменён")
+
+    return await callback_query.message.delete()
+
+@router.message(SwapEntriesState.waiting_postition)
+async def process_position_message(message: Message, state: FSMContext):
+    data = await state.get_data()
+    position = message.text
+    queue_id = data["queue_id"]
+    user_id = message.from_user.id
+    if position == MainMenuButtons.CANCEL.value:
+        await state.clear()
+        return await message.answer(
+            "Смена позиции отменена",
+            reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+            )
+    try:
+        position = int(position)
+    except Exception as e:
+        logger.warning(f"Position message error: {e}")
+        return await message.answer("Неправильный формат позиции. Повторите попытку")
+
+    entry = await get_entry_by_position(queue_id, position, user_id)
+
+    if entry is None:
+        return message.answer("Ошибка при выборе позиции. Повторите попытку")
+
+    swap_request = await create_swap_request(queue_id, user_id, entry.user_id)
+    if swap_request is None:
+        await state.clear()
+        return await message.answer("Ошибка создания запроса", reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard())
+
+    await state.set_state(SwapEntriesState.waiting_comment)
+    await state.update_data(target_user_id=entry.user_id, target_pos=position)
+    return message.answer(
+        f"Вы выбрали место <b>№{position}. @{entry.user.username}</b>\nВведите комментарий (опционально)",
+        reply_markup=ReplyKeyboardBuilderFactory.create_writing_comment_keyboard(),
+        parse_mode="HTML"
+    )
+
+@router.message(SwapEntriesState.waiting_postition, F.data == MainMenuButtons.CANCEL.value)
+async def cancel_writing_comment(message: Message, state: FSMContext):
+    await state.clear()
+    return await message.answer(
+        "Отмена запроса на смену позиции",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+        )
+
+@router.message(F.text == WritingCommentButtons.NO_COMMENT.value, SwapEntriesState.waiting_comment)
+async def send_swap_offer(message: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    queue_id = data["queue_id"]
+    user_id_from = message.from_user.id
+    user_from = message.from_user.username
+    target_pos = data["target_pos"]
+    target_user_id = data["target_user_id"]
+    comment = data.get("comment") or None
+
+    entry = await get_entry_by_user_id(queue_id, user_id_from)
+
+    text = (f"<b>Запрос поменяться местами</b>\n"
+            f"Очередь <b>{entry.queue.name}</b>\n"
+            f"Пользователь @{user_from} (место {entry.position}) хочет поменяться с Вами (место {target_pos})")
+
+    if comment:
+        text += f'\n\nКомментарий: <i>{comment}</i>'
+
+    await state.clear()
+
+    await bot.send_message(
+        chat_id=target_user_id, 
+        text=text,
+        reply_markup=InlineKeyboardBuilderFactory().create_acceptance_swap_keyboard(queue_id, target_pos, entry.position),
+        parse_mode="HTML"
+    )
+
+    return await message.answer(
+        f"Предложение встать на место {target_pos} отправлено!",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
+    )
+
+@router.message(SwapEntriesState.waiting_comment)
+async def send_comment_handler(message: Message, state: FSMContext, bot: Bot):
+    comment = message.text
+    await state.update_data(comment=comment)
+    await send_swap_offer(message, state, bot)
+
+@router.callback_query(F.data.startswith("swap:"))
+async def swap_offer_handle(callback_query: CallbackQuery, bot: Bot):
+    _, action, queue_id, current_pos, target_pos = callback_query.data.split(":")
+    queue_id = int(queue_id)
+    current_pos = int(current_pos)
+    target_pos = int(target_pos)
+
+    user = await get_user_by_position(queue_id, current_pos)
+
+    swap_request = await has_active_swap_request(queue_id, user.id)
+
+    if not swap_request:
+        callback_query.answer("Запрос был отменён")
+        return await callback_query.message.delete()
+
+    if action == "accept":
+        await accept_offer(callback_query, queue_id, from_pos=current_pos, new_pos=target_pos, bot=bot)
+    elif action == "decline":
+        await decline_offer(callback_query, queue_id, from_pos=current_pos, new_pos=target_pos, bot=bot)
+
+
+async def accept_offer(callback_query: CallbackQuery, queue_id: int, from_pos: int, new_pos: int, bot: Bot):
+    success, entry_from, entry_to = await swap_users_in_queue_by_pos(queue_id, from_pos, new_pos)
+    
+    if not success:
+        await callback_query.message.delete()
+        return await callback_query.answer("Пользователь не найден в очереди")
+
+    await bot.send_message(
+        chat_id=entry_from.user_id,
+        text=f"Предложение смены позиции в очереди <b>{entry_to.queue.name}</b>\nПринято пользователем @{entry_from.user.username}\nПозиция: {new_pos} –> {from_pos}",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
+    )
+
+    await callback_query.message.edit_text(
+        f"Вы поменялись местами с пользователем @{entry_to.user.username}\nПозиция в очереди <b>{entry_to.queue.name}</b>: {entry_from.position} –> {entry_to.position}",
+        parse_mode="HTML"
+    )
+
+    user_from = await get_user_by_position(queue_id, new_pos)
+    user_to = await get_user_by_position(queue_id, from_pos)
+
+    await delete_swap_request_by_users(queue_id, user_from.id, user_to.id)
+
+async def decline_offer(callback_query: CallbackQuery, queue_id: int, from_pos: int, new_pos: int, bot: Bot):
+    entry_from = await get_entry_by_position(queue_id, from_pos)
+    entry_to = await get_entry_by_position(queue_id, new_pos)
+
+    await bot.send_message(
+        chat_id=entry_to.user_id,
+        text=f"Предложение смены позиции в очереди <b>{entry_to.queue.name}</b>\bОтклонено пользователем @{entry_from.user.username}\n",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
+    )
+
+    await callback_query.message.edit_text(
+        f"Предложение смены позиции в очереди <b>{entry_to.queue.name}</b> с пользователем @{entry_to.user.username} отклонено!",
+        parse_mode="HTML"
+    )
+
+    user_from = await get_user_by_position(queue_id, new_pos)
+    user_to = await get_user_by_position(queue_id, from_pos)
+
+    await delete_swap_request_by_users(queue_id, user_from.id, user_to.id)
 
 async def queue_back_hanlder(callback_query: CallbackQuery):
     return await open_queue_callback(callback_query)

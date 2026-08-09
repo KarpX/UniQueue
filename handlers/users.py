@@ -1,23 +1,32 @@
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
 from accessors.rooms import change_member_role, delete_room_member, get_room_member_by_user_id
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
 from accessors.users import get_or_create_user
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
+from aiogram.fsm.context import FSMContext
 
 from database.models import UserRole
+from handlers.rooms import join_room_by_link, room_settings_callback
 
 
 router = Router()
 
 @router.message(Command("start"))
-async def start_command(message):
+async def start_command(message: Message, command: CommandObject):
+    args = command.args
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
-    await message.answer(
-        f"Hello, @{user.username or 'User'}! Your ID is {user.id}.",
-        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
-    )
+
+    if not args:
+        return await message.answer(
+           "Привет! Я бот для управления очередями. Войдите в комнату по ссылке или коду.",
+            reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+        )
+
+    invite_code = args.strip().upper()
+
+    await join_room_by_link(message, user.id, invite_code)
 
 
 @router.callback_query(F.data.startswith("mem:view"))
@@ -41,7 +50,7 @@ async def view_member_hanlde(callback_query: CallbackQuery):
     )
 
 @router.callback_query(F.data.startswith("member_settings:"))
-async def member_settings_handle(callback_query: CallbackQuery):
+async def member_settings_handle(callback_query: CallbackQuery, state: FSMContext):
     _, action, room_id, user_id = callback_query.data.split(":")
     room_id = int(room_id)
     user_id = int(user_id)
@@ -51,7 +60,7 @@ async def member_settings_handle(callback_query: CallbackQuery):
     elif action == "make_member":
         await change_role(callback_query, room_id, user_id, UserRole.MEMBER)
     elif action == "kick_member":
-        await kick_member(callback_query, room_id, user_id)
+        await kick_member(callback_query, room_id, user_id, state)
 
 
 async def change_role(callback_query: CallbackQuery, room_id: int, user_id: int, role):
@@ -76,12 +85,13 @@ async def change_role(callback_query: CallbackQuery, room_id: int, user_id: int,
 
     return await callback_query.answer("Роль изменена")
 
-async def kick_member(callback_query: CallbackQuery, room_id: int, user_id: int):
+async def kick_member(callback_query: CallbackQuery, room_id: int, user_id: int, state: FSMContext):
     success = await delete_room_member(room_id, user_id)
 
     if not success:
         return await callback_query.answer("Ошибка изгнания участника")
-
+    
+    await room_settings_callback(callback_query, state)
     return await callback_query.answer("Участник выгнан")
 
 # Note: registration with Dispatcher is done in main.py via decorator wrappers there.

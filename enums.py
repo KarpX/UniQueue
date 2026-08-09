@@ -3,6 +3,7 @@ from enum import Enum
 
 MEMBERS_PER_PAGE = 10
 
+
 class MainMenuButtons(Enum):
     CREATE_ROOM = "Создать комнату"
     JOIN_ROOM = "Присоединиться к комнате"
@@ -24,6 +25,7 @@ class RoomInlineButtons(Enum):
 class QueueInlineButtons(Enum):
     JOIN_QUEUE = "Записаться"
     EXIT_QUEUE = "Выйти"
+    SWAP_QUEUE = "Поменяться"
     SKIP_QUEUE = "Пропустить"
     BACK_QUEUE = "Назад"
 
@@ -39,4 +41,19 @@ class MemberInlineButtons(Enum):
     KICK_MEMBER = "❌ Исключить из группы"
     BACK_MEMBER = "⬅️ Назад"
 
-    
+
+class RoomSettingsButtons(Enum):
+    RENAME_ROOM = "Переименовать"
+    DELETE_ROOM = "Удалить"
+    BACK_ROOM = "Назад"
+
+
+class WritingCommentButtons(Enum):
+    NO_COMMENT = "Пропустить"
+
+
+class SwapInlineButtons(Enum):
+    ACCEPT = "Принять"
+    DECLINE = "Отклонить"
+
+    CANCEL = "Отменить запрос"
