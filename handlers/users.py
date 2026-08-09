@@ -11,6 +11,7 @@ from aiogram.filters import CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 
 from database.models import UserRole
+from handlers.filters.admin_filter import ChatAdminFilter
 from handlers.queues import generate_queue_message
 from handlers.rooms import join_room_by_link, room_settings_callback
 from states import SwapEntriesState
@@ -82,7 +83,7 @@ async def start_command(message: Message, command: CommandObject, state: FSMCont
 
     await join_room_by_link(message, user.id, invite_code)
 
-@router.message(CommandStart())
+@router.message(CommandStart(), ChatAdminFilter())
 async def cmd_start_common(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
     

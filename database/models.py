@@ -50,6 +50,8 @@ class QueueModel(BaseModel):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     room_id: Mapped[int] = mapped_column(ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String)
+    last_msg_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    last_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
 
     room: Mapped["RoomModel"] = relationship(back_populates="queues")
     entries: Mapped[list["QueueEntry"]] = relationship(back_populates="queue", cascade="all, delete-orphan")
