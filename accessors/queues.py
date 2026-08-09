@@ -193,3 +193,17 @@ async def delete_swap_request_by_users(queue_id: int, user_id_from: int, user_id
             return True
 
         return False
+
+async def get_queue_by_id(queue_id: int):
+    async with async_session() as session:
+        stmt = (
+            select(QueueModel)
+            .options(
+                selectinload(QueueModel.entries)
+                .selectinload(QueueEntry.user)
+            )
+            .filter(QueueModel.id == queue_id)
+            .execution_options(populate_existing=True)
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()

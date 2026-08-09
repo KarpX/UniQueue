@@ -28,6 +28,7 @@ class RoomModel(BaseModel):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     invite_code: Mapped[str] = mapped_column(String, unique=True, index=True)
+    telegram_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=True)
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     queues: Mapped[list["QueueModel"]] = relationship(

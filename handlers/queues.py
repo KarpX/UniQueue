@@ -1,4 +1,6 @@
-from accessors.rooms import get_room_with_queue
+from aiogram.filters import Command
+
+from accessors.rooms import get_room_by_chat_id, get_room_with_queue
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
 from accessors.queues import create_swap_request, delete_queue, delete_swap_request, delete_swap_request_by_users, get_entry_by_position, get_entry_by_user_id, get_entry_with_user_by_user_id, get_queue_with_data, get_swap_request_by_id, has_active_swap_request, reindex_queue, swap_users_in_queue, swap_users_in_queue_by_pos
 from aiogram.fsm.context import FSMContext
@@ -17,14 +19,17 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-async def generate_queue_message(user_id: int, queue: QueueModel):
+async def generate_queue_message(
+    user_id: int, 
+    queue: QueueModel, 
+    in_group: bool = False,
+    bot: Bot = None
+    ):
     text_lines = [f"Очередь <b>{queue.name}</b>", ""]
     user_ids_in_queue = [entry.user_id for entry in queue.entries]
 
     room = await get_room_with_queue(queue.id)
-    logger.info(room.id)
     room_members_admin_ids = [member.user_id for member in room.members if member.role == UserRole.ADMIN]
-    logger.info(room_members_admin_ids)
 
     if not queue.entries:
         text_lines.append("<i>Пусто...</i>")
@@ -36,7 +41,16 @@ async def generate_queue_message(user_id: int, queue: QueueModel):
 
     is_in_queue = user_id in user_ids_in_queue
 
-    keyboard = InlineKeyboardBuilderFactory.queue_inline_keyboard(user_id, is_in_queue, room_members_admin_ids, queue.id, queue.room_id)
+    bot_info = await bot.get_me()
+
+    keyboard = InlineKeyboardBuilderFactory.queue_inline_keyboard(
+        user_id, 
+        is_in_queue, 
+        room_members_admin_ids, 
+        queue.id, 
+        queue.room_id,
+        in_group,
+        bot_info.username)
     
     return "\n".join(text_lines), keyboard
 
@@ -79,7 +93,7 @@ async def process_queue_name(message, state):
 
 @router.callback_query(F.data.startswith("queue_back:"))
 @router.callback_query(F.data.startswith("open_queue:"))
-async def open_queue_callback(callback_query: CallbackQuery):
+async def open_queue_callback(callback_query: CallbackQuery, bot: Bot):
     queue_id = int(callback_query.data.split(":")[1])
     async with async_session() as session:
         queue = await get_queue_with_data(session, queue_id)
@@ -87,7 +101,12 @@ async def open_queue_callback(callback_query: CallbackQuery):
     if not queue:
         return await callback_query.answer("Очередь не найдена")
 
-    text, keyboard = await generate_queue_message(callback_query.from_user.id, queue)
+    text, keyboard = await generate_queue_message(
+        callback_query.from_user.id, 
+        queue, 
+        callback_query.message.chat.type in ["group", "supergroup"],
+        bot
+    )
     await callback_query.message.edit_text(
         text,
         reply_markup=keyboard,
@@ -96,7 +115,7 @@ async def open_queue_callback(callback_query: CallbackQuery):
     return await callback_query.answer()
 
 @router.callback_query(F.data.startswith("queue_control:"))
-async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext):
+async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext, bot: Bot):
     data = callback_query.data.split(":")
     command, queue_id = data[1], int(data[2])
     user_id = callback_query.from_user.id
@@ -184,7 +203,12 @@ async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext
         
         updated_queue = await get_queue_with_data(session, queue_id)
 
-    text, keyboard = await generate_queue_message(user_id, updated_queue)
+    text, keyboard = await generate_queue_message(
+        user_id, 
+        updated_queue, 
+        callback_query.message.chat.type in ["group", "supergroup"],
+        bot
+    )
     try:
         return await callback_query.message.edit_text(
             text,
@@ -433,7 +457,7 @@ async def swap_offer_handle(callback_query: CallbackQuery, bot: Bot):
     swap_request = await has_active_swap_request(queue_id, user.id)
 
     if not swap_request:
-        callback_query.answer("Запрос был отменён")
+        await callback_query.answer("Запрос был отменён")
         return await callback_query.message.delete()
 
     if action == "accept":
@@ -489,5 +513,36 @@ async def decline_offer(callback_query: CallbackQuery, queue_id: int, from_pos: 
 
 async def queue_back_hanlder(callback_query: CallbackQuery):
     return await open_queue_callback(callback_query)
+
+@router.message(Command("queue"))
+async def send_queue_message_command(message: Message):
+    user_id = message.from_user.id
+    room = await get_room_by_chat_id(message.chat.id)
+
+    queues = room.queues
+
+    room_users_ids = [member.user_id for member in room.members]
+
+    if not room:
+        return await message.answer(
+            "Такая комната не существует",
+            show_alert=True
+        )
+
+    if user_id and user_id not in room_users_ids:
+        return await message.answer(
+            "Вы не участник комнаты",
+            show_alert=True
+        )
+
+    buttons = [(queue.name, f"open_queue:{queue.id}") for queue in queues]
+    
+    return await message.answer(
+        f"Очереди в комнате <b>{room.name}</b>",
+        reply_markup=InlineKeyboardBuilderFactory().build_inline_keyboard(
+            buttons, 
+            adjust=[2] * len(queues),),
+        parse_mode="HTML"
+    )
 
 # End of queues handlers
