@@ -165,3 +165,38 @@ async def join_room_with_unicode(user_id: int, invite_code: str):
         session.add(room_member)
         await session.commit()
         return "success", room
+
+async def get_room_by_invite_code(invite_code: str):
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomModel)
+            .filter(RoomModel.invite_code == invite_code)
+        )
+        room = result.scalar_one_or_none()
+
+        return room
+
+async def bind_room_to_chat(room_id: int, chat_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomModel)
+            .filter(RoomModel.id == room_id)
+        )
+        room = result.scalar_one_or_none()
+
+        if room:
+            room.telegram_chat_id = chat_id
+            await session.commit()
+            return room
+
+        return None
+
+async def get_room_by_chat_id(chat_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomModel)
+            .options(selectinload(RoomModel.queues), selectinload(RoomModel.members))
+            .filter(RoomModel.telegram_chat_id == chat_id)
+        )
+        room = result.scalar_one_or_none()
+        return room

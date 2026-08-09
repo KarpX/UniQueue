@@ -45,7 +45,11 @@ class InlineKeyboardBuilderFactory:
     def build_inline_keyboard(buttons: list[tuple[str, str]], adjust: list[int] | None = None) -> InlineKeyboardBuilder:
         builder = InlineKeyboardBuilder()
 
-        builder.add(*(InlineKeyboardButton(text=btn[0], callback_data=btn[1]) for btn in buttons))
+        for text, data in buttons:
+            if data.startswith("http://") or data.startswith("https://"):
+                builder.add(InlineKeyboardButton(text=text, url=data))
+            else:
+                builder.add(InlineKeyboardButton(text=text, callback_data=data))
     
         if adjust:
             builder.adjust(*adjust)
@@ -65,8 +69,26 @@ class InlineKeyboardBuilderFactory:
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 2, 1])
 
     @staticmethod
-    def queue_inline_keyboard(user_id: int, is_in_queue: bool, room_members_admin_ids: list[int], queue_id: int, room_id: int):
+    def queue_inline_keyboard(
+        user_id: int, 
+        is_in_queue: bool,
+        room_members_admin_ids: list[int],
+        queue_id: int,
+        room_id: int, 
+        in_group: bool = False,
+        bot_username = None):
         buttons = []
+        if in_group:
+            swap_url = f"https://t.me/{bot_username}?start=swap_{queue_id}"
+
+            buttons.append((QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"))
+            buttons.append((QueueInlineButtons.EXIT_QUEUE.value, f"queue_control:exit:{queue_id}"))
+    
+            buttons.append((QueueInlineButtons.SKIP_QUEUE.value, f"queue_control:skip:{queue_id}"))
+            buttons.append((QueueInlineButtons.SWAP_QUEUE.value, swap_url))
+    
+            return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 1, 1])
+        
         if not is_in_queue:
             buttons.append((QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"))
         else:

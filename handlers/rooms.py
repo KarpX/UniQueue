@@ -1,9 +1,13 @@
 import logging
 
+from aiogram.filters import Command, CommandObject
+
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
 from accessors.users import get_or_create_user
 from accessors.rooms import (
+    bind_room_to_chat,
     delete_room,
+    get_room_by_invite_code,
     get_room_by_name_and_creator,
     get_room_member,
     get_rooms_for_user,
@@ -20,6 +24,7 @@ from enums import MEMBERS_PER_PAGE, MainMenuButtons
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
+from handlers.filters.admin_filter import ChatAdminFilter
 from main import bot
 
 from states import CreateQueueState, CreateRoomState, JoinRoomState
@@ -373,7 +378,7 @@ async def queue_callback(callback_query: CallbackQuery, room_id: int | None = No
     if not room_id:
         room_id = int(callback_query.data.split(":")[1])
     
-    user_id = callback_query.message.from_user.id
+    user_id = callback_query.from_user.id
     async with async_session() as session:
         result = await session.execute(
             select(RoomModel)
@@ -394,7 +399,7 @@ async def queue_callback(callback_query: CallbackQuery, room_id: int | None = No
             show_alert=True
         )
 
-    if user_id and user_id in room_users_ids:
+    if user_id and user_id not in room_users_ids:
         return await callback_query.answer(
             "Вы не участник комнаты",
             show_alert=True
@@ -459,5 +464,22 @@ async def join_room_by_link(message: Message, user_id: int, invite_code: str):
         reply_markup=ReplyKeyboardBuilderFactory.create_main_menu_keyboard(),
         parse_mode="HTML"
     )
+
+@router.message(Command("bind"), F.chat.type.in_({"group", "supergroup"}), ChatAdminFilter())
+async def cmd_bind(message: Message, command: CommandObject):
+    if not command.args:
+        return await message.answer("Использование: /bind [код комнаты]")
+
+    invite_code = command.args.strip().upper()
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    room = await get_room_by_invite_code(invite_code)
+
+    if not room or room.creator_id != user_id:
+        return await message.answer("Вы должны быть создателем комнаты")
+
+    room = await bind_room_to_chat(room.id, chat_id)
+    await message.answer(f"Группа успешно привязана к комнате <b>{room.name}</b>", parse_mode="HTML")
 
 # End of rooms handlers
