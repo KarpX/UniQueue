@@ -19,7 +19,7 @@ async def start_command(message: Message, command: CommandObject):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
 
     if not args:
-        await message.answer(
+        return await message.answer(
            "Привет! Я бот для управления очередями. Войдите в комнату по ссылке или коду.",
             reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
         )
