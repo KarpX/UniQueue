@@ -1,5 +1,5 @@
-from database.models import QueueEntry, QueueModel
-from sqlalchemy import select
+from database.models import QueueEntry, QueueModel, SwapRequest
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 from database.session import async_session
 
@@ -114,3 +114,82 @@ async def get_entry_by_user_id(queue_id: int, user_id: int):
         )
         entry = result.scalar_one_or_none()
         return entry
+
+async def get_entry_with_user_by_user_id(queue_id: int, user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueEntry)
+            .options(selectinload(QueueEntry.user), selectinload(QueueEntry.queue))
+            .filter(QueueEntry.queue_id == queue_id, QueueEntry.user_id == user_id)
+        )
+        entry = result.scalar_one_or_none()
+        return entry
+
+async def has_active_swap_request(queue_id: int, user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(SwapRequest)
+            .options(selectinload(SwapRequest.queue), selectinload(SwapRequest.target), selectinload(SwapRequest.sender))
+            .filter(SwapRequest.queue_id == queue_id, or_(SwapRequest.sender_id == user_id, SwapRequest.target_id == user_id))
+        )
+        swap_request = result.scalar_one_or_none()
+
+        return swap_request
+
+async def create_swap_request(queue_id: int, user_id: int, target_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(SwapRequest)
+            .filter(SwapRequest.queue_id == queue_id, SwapRequest.sender_id == user_id)
+        )
+        swap_request = result.scalar_one_or_none()
+
+        if swap_request is None:
+            new_request = SwapRequest(queue_id = queue_id, sender_id = user_id, target_id = target_id)
+            session.add(new_request)
+            await session.commit()
+            return new_request
+
+        return None
+
+async def get_swap_request_by_id(swap_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(SwapRequest)
+            .filter(SwapRequest.id == swap_id)
+        )
+        swap_request = result.scalar_one_or_none()
+
+        return swap_request
+
+async def delete_swap_request(swap_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(SwapRequest)
+            .filter(SwapRequest.id == swap_id)
+        )
+        swap_request = result.scalar_one_or_none()
+
+        if swap_request:
+            await session.delete(swap_request)
+            await session.commit()
+            return True
+
+        return False
+
+async def delete_swap_request_by_users(queue_id: int, user_id_from: int, user_id_to: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(SwapRequest)
+            .filter(SwapRequest.queue_id == queue_id,
+                SwapRequest.sender_id == user_id_from,
+                SwapRequest.target_id == user_id_to)
+        )
+        swap_request = result.scalar_one_or_none()
+
+        if swap_request:
+            await session.delete(swap_request)
+            await session.commit()
+            return True
+
+        return False

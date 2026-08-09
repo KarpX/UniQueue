@@ -55,3 +55,5 @@ class WritingCommentButtons(Enum):
 class SwapInlineButtons(Enum):
     ACCEPT = "Принять"
     DECLINE = "Отклонить"
+
+    CANCEL = "Отменить запрос"

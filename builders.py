@@ -1,8 +1,12 @@
+import logging
+
 from aiogram.types import InlineKeyboardButton, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from database.models import UserRole
 from enums import MainMenuButtons, MemberInlineButtons, QueueInlineButtons, RoomInlineButtons, RoomSettingsButtons, SwapInlineButtons, WritingCommentButtons
 
+
+logger = logging.getLogger(__name__)
 
 class ReplyKeyboardBuilderFactory:
     @staticmethod
@@ -28,6 +32,11 @@ class ReplyKeyboardBuilderFactory:
     @staticmethod
     def create_cancel_swap_keyboard():
         buttons = [MainMenuButtons.CANCEL.value]
+        return ReplyKeyboardBuilderFactory().build_keyboard(buttons)
+
+    @staticmethod
+    def create_cancel_swap_request_keyboard():
+        buttons = [SwapInlineButtons.CANCEL.value]
         return ReplyKeyboardBuilderFactory().build_keyboard(buttons)
 
 
@@ -153,3 +162,9 @@ class InlineKeyboardBuilderFactory:
         ]
 
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2])
+
+    @staticmethod
+    def create_cancel_swap_request_keyboard(swap_id: int):
+        buttons = [(SwapInlineButtons.CANCEL.value, f"cancel_request:{swap_id}")]
+
+        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons)
