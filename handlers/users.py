@@ -50,7 +50,7 @@ async def start_command(message: Message, command: CommandObject, state: FSMCont
     
                 return await message.answer(
                     text=text,
-                    reply_markup=InlineKeyboardBuilderFactory().create_acceptance_swap_keyboard(queue_id, entry_to.position, entry_from.position),
+                    reply_markup=InlineKeyboardBuilderFactory().create_acceptance_swap_keyboard(active_swap_request.id),
                     parse_mode="HTML"
                 )
     

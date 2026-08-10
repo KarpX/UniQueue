@@ -177,10 +177,10 @@ class InlineKeyboardBuilderFactory:
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1, 1])
 
     @staticmethod
-    def create_acceptance_swap_keyboard(queue_id: int, pos_to: int, pos_from: int):
+    def create_acceptance_swap_keyboard(swap_request_id: int):
         buttons = [
-            (SwapInlineButtons.DECLINE.value, f"swap:decline:{queue_id}:{pos_to}:{pos_from}"),
-            (SwapInlineButtons.ACCEPT.value, f"swap:accept:{queue_id}:{pos_to}:{pos_from}")
+            (SwapInlineButtons.DECLINE.value, f"swap:decline:{swap_request_id}"),
+            (SwapInlineButtons.ACCEPT.value, f"swap:accept:{swap_request_id}")
         ]
 
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2])
