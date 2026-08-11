@@ -4,7 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from accessors.rooms import get_room_by_chat_id, get_room_with_queue
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
-from accessors.queues import clear_msg_and_chat_ids, create_swap_request, delete_queue, delete_swap_request, delete_swap_request_by_users, get_entry_by_position, get_entry_by_user_id, get_entry_with_user_by_user_id, get_queue_by_id, get_queue_with_data, get_swap_request_by_id, has_active_swap_request, reindex_queue, swap_users_in_queue, swap_users_in_queue_by_pos, update_msg_and_chat_ids
+from accessors.queues import clear_msg_and_chat_ids, clear_queue_entries, create_swap_request, delete_queue, delete_swap_request, delete_swap_request_by_users, get_entry_by_position, get_entry_by_user_id, get_entry_with_user_by_user_id, get_queue_by_id, get_queue_with_data, get_swap_request_by_id, has_active_swap_request, reindex_queue, swap_users_in_queue, swap_users_in_queue_by_pos, update_msg_and_chat_ids
 from aiogram.fsm.context import FSMContext
 from accessors.users import get_or_create_user, get_user_by_position
 from database.session import async_session
@@ -117,9 +117,11 @@ async def process_queue_name(message, state):
 
 @router.callback_query(F.data.startswith("queue_back:"))
 @router.callback_query(F.data.startswith("open_queue:"))
-async def open_queue_callback(callback_query: CallbackQuery, bot: Bot):
+async def open_queue_callback(callback_query: CallbackQuery, bot: Bot, queue_id: int | None = None):
     data = callback_query.data.split(":")
-    queue_id = int(data[1])
+
+    if queue_id is None:
+        queue_id = int(data[1])
     
     async with async_session() as session:
         queue = await get_queue_with_data(session, queue_id)
@@ -127,7 +129,7 @@ async def open_queue_callback(callback_query: CallbackQuery, bot: Bot):
     if not queue:
         return await callback_query.answer("Очередь не найдена")
 
-    if len(data) > 2:
+    if callback_query.data.startswith("open_queue:") and len(data) > 2:
         chat_id = data[2]
         await bot.pin_chat_message(chat_id, callback_query.message.message_id)
 
@@ -234,13 +236,30 @@ async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext
             await swap_entries_handler(callback_query, state, user_id, queue_id)
 
         await session.commit()
-        
+
+        updated_queue = await get_queue_with_data(session, queue_id)
         await update_live_queue(bot, queue_id)
+
+    text, keyboard = await generate_queue_message(
+        user_id, 
+        updated_queue, 
+        callback_query.message.chat.type in ["group", "supergroup"],
+        bot
+    )
+    try:
+        return await callback_query.message.edit_text(
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except Exception:
+        logger.info("Ошибка при изменении сообщения очереди")
+        pass
 
 @router.callback_query(F.data.startswith("queue_admin:"))
 async def queue_admin_handler(callback_query: CallbackQuery, state: FSMContext, bot: Bot):
     method = callback_query.data.split(":")[1]
-    queue_id = callback_query.data.split(":")[2]
+    queue_id = int(callback_query.data.split(":")[2])
 
     if method == "settings":
         await queue_settings_handler(callback_query)
@@ -248,9 +267,43 @@ async def queue_admin_handler(callback_query: CallbackQuery, state: FSMContext, 
         await queue_delete_handler(callback_query) 
     elif method == "rename":
         await queue_rename_handler(callback_query, state)
+    elif method == "clear":
+        await queue_clear_handler(callback_query)
     
     await update_live_queue(bot, queue_id)
     return
+
+@router.callback_query(F.data.startswith("confirm:"))
+async def confrim_action_handler(callback_query: CallbackQuery, bot: Bot):
+    action = callback_query.data.split(":")[2]
+    target_id = int(callback_query.data.split(":")[1])
+
+    if action == "clear":
+        await clear_queue_action(callback_query, target_id)
+        await open_queue_callback(callback_query, bot, target_id)
+
+@router.callback_query(F.data.startswith("back"))
+async def cancel_action_handler(callback_query: CallbackQuery, bot: Bot):
+    action = callback_query.data.split(":")[2]
+    target_id = int(callback_query.data.split(":")[1])
+
+    if action == "clear":
+        await open_queue_callback(callback_query, bot, target_id)
+
+async def clear_queue_action(callback_query: CallbackQuery, queue_id: int):
+    await clear_queue_entries(queue_id)
+
+    await callback_query.answer("Очередь очищена")
+
+async def queue_clear_handler(callback_query: CallbackQuery):
+    method = callback_query.data.split(":")[1]
+    queue_id = int(callback_query.data.split(":")[2])
+    queue = await get_queue_by_id(queue_id)
+
+    await callback_query.message.edit_text(
+        text=f"Очистить очередь {queue.name}?",
+        reply_markup=InlineKeyboardBuilderFactory().create_confirmation_keyboard(method, queue_id)
+    )
 
 async def queue_settings_handler(callback_query: CallbackQuery):
     queue_id = callback_query.data.split(":")[2]

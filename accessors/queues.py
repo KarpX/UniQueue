@@ -1,5 +1,5 @@
 from database.models import QueueEntry, QueueModel, SwapRequest
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import selectinload
 from database.session import async_session
 
@@ -289,3 +289,11 @@ async def clear_msg_and_chat_ids(queue_id: int):
             queue.last_msg_id = None
             queue.last_chat_id = None
             await session.commit()
+
+async def clear_queue_entries(queue_id: int):
+    async with async_session() as session:
+        await session.execute(
+            delete(QueueEntry)
+            .where(QueueEntry.queue_id == queue_id)
+        )
+        await session.commit()
