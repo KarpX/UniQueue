@@ -1,5 +1,5 @@
-from database.models import QueueEntry, QueueModel, SwapRequest
-from sqlalchemy import or_, select
+from database.models import QueueEntry, QueueModel, RoomModel, SwapRequest
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import selectinload
 from database.session import async_session
 
@@ -53,20 +53,22 @@ async def delete_queue(queue_id: int):
 
         return queue.room_id
 
-async def swap_users_in_queue(session, queue_id: int, user_id_1: int, user_id_2: int):
+async def swap_users_in_queue(session, queue_id: int, user_1: int, user_2: int):
     stmt = select(QueueEntry).filter(
         QueueEntry.queue_id == queue_id,
-        QueueEntry.user_id.in_([user_id_1, user_id_2])
+        QueueEntry.user_id.in_([user_1, user_2])
     )
     result = await session.execute(stmt)
     entries = result.scalars().all()
 
     if len(entries) != 2:
-        return False
+        return False, None, None
 
+    # Просто меняем их позиции местами
     entries[0].position, entries[1].position = entries[1].position, entries[0].position
     
-    return True
+    # Возвращаем обновленные объекты, чтобы знать их новые позиции для текста
+    return True, entries[0], entries[1]
 
 async def swap_users_in_queue_by_pos(queue_id: int, pos_1: int, pos_2: int):
     async with async_session() as session:
@@ -75,21 +77,85 @@ async def swap_users_in_queue_by_pos(queue_id: int, pos_1: int, pos_2: int):
             .options(selectinload(QueueEntry.user), selectinload(QueueEntry.queue))
             .filter(
                 QueueEntry.queue_id == queue_id,
-                QueueEntry.position.in_([pos_1, pos_2])
+                QueueEntry.position == pos_1
             )
         )
-        entries = result.scalars().all()
+        entry_1 = result.scalar_one_or_none()
 
-        if len(entries) != 2:
+        result = await session.execute(
+            select(QueueEntry)
+            .options(selectinload(QueueEntry.user), selectinload(QueueEntry.queue))
+            .filter(
+                QueueEntry.queue_id == queue_id,
+                QueueEntry.position == pos_2
+            )
+        )
+        entry_2 = result.scalar_one_or_none()
+
+        if not entry_1 or not entry_2:
             return False, None, None
 
-        entries[0].position, entries[1].position = entries[1].position, entries[0].position
+        entry_1.position, entry_2.position = entry_2.position, entry_1.position
 
         await reindex_queue(session, queue_id)
 
         await session.commit()
 
-        return True, entries[0], entries[1]
+        return True, entry_1, entry_2
+
+async def confirm_and_execute_swap(session, request_id: int, target_id: int):
+    """
+    request_id: ID записи из таблицы swap_requests
+    target_id: ID того, кто нажал "Принять" (для проверки безопасности)
+    """
+    # 1. Получаем запрос со всеми данными
+    stmt = (
+        select(SwapRequest)
+        .options(
+            selectinload(SwapRequest.queue),
+            selectinload(SwapRequest.sender),
+            selectinload(SwapRequest.target)
+        )
+        .filter(SwapRequest.id == request_id)
+    )
+    result = await session.execute(stmt)
+    request = result.scalar_one_or_none()
+
+    # Проверка: существует ли запрос и тот ли человек нажал кнопку
+    if not request or request.target_id != target_id:
+        return False, None, None, None
+
+    # 2. Получаем записи в очереди для ОБОИХ участников по их USER_ID
+    stmt_entries = (
+        select(QueueEntry)
+        .filter(
+            QueueEntry.queue_id == request.queue_id,
+            QueueEntry.user_id.in_([request.sender_id, request.target_id])
+        )
+    )
+    entries_result = await session.execute(stmt_entries)
+    entries = entries_result.scalars().all()
+
+    if len(entries) != 2:
+        # Кто-то уже вышел из очереди
+        await session.delete(request)
+        await session.commit()
+        return False, None, None, None
+
+    # Определяем кто есть кто
+    sender_entry = next(e for e in entries if e.user_id == request.sender_id)
+    target_entry = next(e for e in entries if e.user_id == request.target_id)
+
+    # 3. МЕНЯЕМ МЕСТАМИ
+    sender_entry.position, target_entry.position = target_entry.position, sender_entry.position
+
+    # 4. Удаляем запрос на обмен
+    await session.delete(request)
+    
+    # 5. Сохраняем всё одним махом
+    await session.commit()
+
+    return True, sender_entry, target_entry, request.queue.name
 
 async def get_entry_by_position(queue_id: int, position: int, user_id: int | None = None):
     async with async_session() as session:
@@ -222,4 +288,71 @@ async def clear_msg_and_chat_ids(queue_id: int):
         if queue:
             queue.last_msg_id = None
             queue.last_chat_id = None
+            await session.commit()
+
+async def clear_queue_entries(queue_id: int):
+    async with async_session() as session:
+        await session.execute(
+            delete(QueueEntry)
+            .where(QueueEntry.queue_id == queue_id)
+        )
+        await session.commit()
+
+async def delete_first_entry(queue_id: int):
+    async with async_session() as session:
+        await session.execute(
+            delete(QueueEntry)
+            .where(
+                QueueEntry.queue_id == queue_id,
+                QueueEntry.position == 1
+            )
+        )
+        await session.commit()
+
+async def clear_speaker_id(queue_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if queue is not None:
+            queue.current_speaker_id = None
+            await session.commit()
+
+async def set_speaker_id(queue_id: int, user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if queue is not None:
+            queue.current_speaker_id = user_id
+            await session.commit()
+
+async def clear_notified_next_id(queue_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if queue is not None:
+            queue.notified_next_id = None
+            await session.commit()
+
+async def set_notified_next_id(queue_id: int, user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if queue is not None:
+            queue.notified_next_id = user_id
             await session.commit()

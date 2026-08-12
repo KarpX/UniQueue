@@ -76,18 +76,21 @@ class InlineKeyboardBuilderFactory:
         queue_id: int,
         room_id: int, 
         in_group: bool = False,
-        bot_username = None):
+        bot_username = None
+        ):
         buttons = []
         if in_group:
             swap_url = f"https://t.me/{bot_username}?start=swap_{queue_id}"
 
-            buttons.append((QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"))
-            buttons.append((QueueInlineButtons.EXIT_QUEUE.value, f"queue_control:exit:{queue_id}"))
+            buttons += [
+                (QueueInlineButtons.EXIT_QUEUE.value, f"queue_control:exit:{queue_id}"),
+                (QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"),
+                (QueueInlineButtons.SKIP_QUEUE.value, f"queue_control:skip:{queue_id}"),
+                (QueueInlineButtons.MOVE_QUEUE.value, f"queue_admin:move:{queue_id}"),
+                (QueueInlineButtons.SWAP_QUEUE.value, swap_url)
+            ]
     
-            buttons.append((QueueInlineButtons.SKIP_QUEUE.value, f"queue_control:skip:{queue_id}"))
-            buttons.append((QueueInlineButtons.SWAP_QUEUE.value, swap_url))
-    
-            return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 1, 1])
+            return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 2, 1])
         
         if not is_in_queue:
             buttons.append((QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"))
@@ -98,11 +101,15 @@ class InlineKeyboardBuilderFactory:
         buttons.append((QueueInlineButtons.SWAP_QUEUE.value, f"queue_control:swap:{queue_id}:{user_id}"))
     
         if user_id in room_members_admin_ids:
-            buttons.append((QueueInlineButtons.SETTINGS_QUEUE.value, f"queue_admin:settings:{queue_id}"))
+            buttons += [
+                (QueueInlineButtons.CLEAR_QUEUE.value, f"queue_admin:clear:{queue_id}"),
+                (QueueInlineButtons.MOVE_QUEUE.value, f"queue_admin:move:{queue_id}"),
+                (QueueInlineButtons.SETTINGS_QUEUE.value, f"queue_admin:settings:{queue_id}")
+            ]
     
         buttons.append((QueueInlineButtons.BACK_QUEUE.value, f"queue:{room_id}"))
 
-        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 1, 1])
+        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 1, 2, 1, 1])
 
     @staticmethod
     def queue_settings_keyboard(queue_id: int):
@@ -177,10 +184,10 @@ class InlineKeyboardBuilderFactory:
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1, 1])
 
     @staticmethod
-    def create_acceptance_swap_keyboard(queue_id: int, pos_to: int, pos_from: int):
+    def create_acceptance_swap_keyboard(swap_request_id: int):
         buttons = [
-            (SwapInlineButtons.DECLINE.value, f"swap:decline:{queue_id}:{pos_to}:{pos_from}"),
-            (SwapInlineButtons.ACCEPT.value, f"swap:accept:{queue_id}:{pos_to}:{pos_from}")
+            (SwapInlineButtons.DECLINE.value, f"swap:decline:{swap_request_id}"),
+            (SwapInlineButtons.ACCEPT.value, f"swap:accept:{swap_request_id}")
         ]
 
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2])
@@ -190,3 +197,12 @@ class InlineKeyboardBuilderFactory:
         buttons = [(SwapInlineButtons.CANCEL.value, f"cancel_request:{swap_id}")]
 
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons)
+
+    @staticmethod
+    def create_confirmation_keyboard(action: str, target_id: int):
+        buttons = [
+            (MainMenuButtons.CONFIRM.value, f"confirm:{target_id}:{action}"),
+            (MainMenuButtons.CANCEL.value, f"back:{target_id}:{action}")
+        ]
+
+        return InlineKeyboardBuilderFactory.build_inline_keyboard(buttons, adjust=[2])

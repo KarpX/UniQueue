@@ -1,13 +1,14 @@
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
+from sqlalchemy.orm import selectinload
 
-from accessors.rooms import get_room_by_chat_id, get_room_with_queue
+from accessors.rooms import get_members_of_room, get_room_by_chat_id, get_room_with_queue
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
-from accessors.queues import clear_msg_and_chat_ids, create_swap_request, delete_queue, delete_swap_request, delete_swap_request_by_users, get_entry_by_position, get_entry_by_user_id, get_entry_with_user_by_user_id, get_queue_by_id, get_queue_with_data, get_swap_request_by_id, has_active_swap_request, reindex_queue, swap_users_in_queue, swap_users_in_queue_by_pos, update_msg_and_chat_ids
+from accessors.queues import clear_msg_and_chat_ids, clear_notified_next_id, clear_queue_entries, clear_speaker_id, create_swap_request, delete_first_entry, delete_queue, delete_swap_request, delete_swap_request_by_users, get_entry_by_position, get_entry_by_user_id, get_entry_with_user_by_user_id, get_queue_by_id, get_queue_with_data, get_swap_request_by_id, has_active_swap_request, reindex_queue, set_notified_next_id, set_speaker_id, swap_users_in_queue, swap_users_in_queue_by_pos, update_msg_and_chat_ids
 from aiogram.fsm.context import FSMContext
 from accessors.users import get_or_create_user, get_user_by_position
 from database.session import async_session
-from database.models import QueueModel, QueueEntry, UserModel, RoomMember, UserRole
+from database.models import QueueModel, QueueEntry, SwapRequest, UserModel, RoomMember, UserRole
 from sqlalchemy import delete, select
 from enums import QueueInlineButtons, MainMenuButtons, SwapInlineButtons, WritingCommentButtons
 from aiogram.types import CallbackQuery, Message
@@ -116,9 +117,11 @@ async def process_queue_name(message, state):
 
 @router.callback_query(F.data.startswith("queue_back:"))
 @router.callback_query(F.data.startswith("open_queue:"))
-async def open_queue_callback(callback_query: CallbackQuery, bot: Bot):
+async def open_queue_callback(callback_query: CallbackQuery, bot: Bot, queue_id: int | None = None):
     data = callback_query.data.split(":")
-    queue_id = int(data[1])
+
+    if queue_id is None:
+        queue_id = int(data[1])
     
     async with async_session() as session:
         queue = await get_queue_with_data(session, queue_id)
@@ -126,7 +129,7 @@ async def open_queue_callback(callback_query: CallbackQuery, bot: Bot):
     if not queue:
         return await callback_query.answer("Очередь не найдена")
 
-    if len(data) > 2:
+    if callback_query.data.startswith("open_queue:") and len(data) > 2:
         chat_id = data[2]
         await bot.pin_chat_message(chat_id, callback_query.message.message_id)
 
@@ -189,6 +192,13 @@ async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext
                 position=len(queue.entries) + 1
             )
             session.add(new_entry)
+
+            if len(queue.entries) == 0:
+                queue.current_speaker_id = user_id
+
+            if len(queue.entries) == 1:
+                queue.notified_next_id = user_id
+            
             await callback_query.answer("Вы записались в очередь")
 
         elif command == "exit":
@@ -230,12 +240,12 @@ async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext
                 await callback_query.answer("Не удалось выполнить пропуск")
 
         elif command == "swap":
-            await swap_entries_handler(callback_query, state, user_id, queue_id)
+            return await swap_entries_handler(callback_query, state, user_id, queue_id)
 
         await session.commit()
-        
+
         updated_queue = await get_queue_with_data(session, queue_id)
-        await update_live_queue(bot, queue_id)
+        await process_queue_updates(bot, queue_id)
 
     text, keyboard = await generate_queue_message(
         user_id, 
@@ -256,7 +266,7 @@ async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext
 @router.callback_query(F.data.startswith("queue_admin:"))
 async def queue_admin_handler(callback_query: CallbackQuery, state: FSMContext, bot: Bot):
     method = callback_query.data.split(":")[1]
-    queue_id = callback_query.data.split(":")[2]
+    queue_id = int(callback_query.data.split(":")[2])
 
     if method == "settings":
         await queue_settings_handler(callback_query)
@@ -264,9 +274,89 @@ async def queue_admin_handler(callback_query: CallbackQuery, state: FSMContext, 
         await queue_delete_handler(callback_query) 
     elif method == "rename":
         await queue_rename_handler(callback_query, state)
+    elif method == "clear":
+        await queue_clear_handler(callback_query)
+    elif method == "move":
+        await queue_move_handler(callback_query, bot)
     
-    await update_live_queue(bot, queue_id)
+    await process_queue_updates(bot, queue_id)
     return
+
+async def queue_move_handler(callback_query: CallbackQuery, bot: Bot):
+    queue_id = int(callback_query.data.split(":")[2])
+    user_id = callback_query.from_user.id
+
+    room = await get_room_with_queue(queue_id)
+    room_admins_ids = [member.user_id for member in room.members if member.role == UserRole.ADMIN]
+
+    first_entry = await get_entry_by_position(queue_id, 1)
+
+    allowed_users = room_admins_ids + [first_entry.user_id]
+
+    if user_id not in allowed_users:
+        return await callback_query.answer(
+            "У вас недостаточно прав или сейчас не ваша очередь",
+            show_alert=True
+        )
+
+    await delete_first_entry(queue_id)
+    await callback_query.answer("Вы сместили очередь")
+
+    async with async_session() as session:
+        await reindex_queue(session, queue_id)
+
+        await session.commit()
+
+    queue = await get_queue_by_id(queue_id)
+
+    text, keyboard = await generate_queue_message(
+            user_id, 
+            queue, 
+            callback_query.message.chat.type in ["group", "supergroup"],
+            bot
+    )
+    try:
+        return await callback_query.message.edit_text(
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except Exception:
+        logger.info("Ошибка при изменении сообщения очереди")
+        pass
+
+@router.callback_query(F.data.startswith("confirm:"))
+async def confrim_action_handler(callback_query: CallbackQuery, bot: Bot):
+    action = callback_query.data.split(":")[2]
+    target_id = int(callback_query.data.split(":")[1])
+
+    if action == "clear":
+        await clear_queue_action(callback_query, target_id)
+        await open_queue_callback(callback_query, bot, target_id)
+        await process_queue_updates(bot, target_id)
+
+@router.callback_query(F.data.startswith("back"))
+async def cancel_action_handler(callback_query: CallbackQuery, bot: Bot):
+    action = callback_query.data.split(":")[2]
+    target_id = int(callback_query.data.split(":")[1])
+
+    if action == "clear":
+        await open_queue_callback(callback_query, bot, target_id)
+
+async def clear_queue_action(callback_query: CallbackQuery, queue_id: int):
+    await clear_queue_entries(queue_id)
+
+    await callback_query.answer("Очередь очищена")
+
+async def queue_clear_handler(callback_query: CallbackQuery):
+    method = callback_query.data.split(":")[1]
+    queue_id = int(callback_query.data.split(":")[2])
+    queue = await get_queue_by_id(queue_id)
+
+    await callback_query.message.edit_text(
+        text=f"Очистить очередь {queue.name}?",
+        reply_markup=InlineKeyboardBuilderFactory().create_confirmation_keyboard(method, queue_id)
+    )
 
 async def queue_settings_handler(callback_query: CallbackQuery):
     queue_id = callback_query.data.split(":")[2]
@@ -354,7 +444,7 @@ async def swap_entries_handler(callback_query: CallbackQuery, state: FSMContext,
 
             return await callback_query.message.answer(
                 text=text,
-                reply_markup=InlineKeyboardBuilderFactory().create_acceptance_swap_keyboard(queue_id, entry_to.position, entry_from.position),
+                reply_markup=InlineKeyboardBuilderFactory().create_acceptance_swap_keyboard(active_swap_request.id),
                 parse_mode="HTML"
             )
 
@@ -419,11 +509,6 @@ async def process_position_message(message: Message, state: FSMContext):
     if entry is None:
         return message.answer("Ошибка при выборе позиции. Повторите попытку")
 
-    swap_request = await create_swap_request(queue_id, user_id, entry.user_id)
-    if swap_request is None:
-        await state.clear()
-        return await message.answer("Ошибка создания запроса", reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard())
-
     await state.set_state(SwapEntriesState.waiting_comment)
     await state.update_data(target_user_id=entry.user_id, target_pos=position)
     return message.answer(
@@ -459,12 +544,17 @@ async def send_swap_offer(message: Message, state: FSMContext, bot: Bot):
     if comment:
         text += f'\n\nКомментарий: <i>{comment}</i>'
 
+    swap_request = await create_swap_request(queue_id, user_id_from, target_user_id)
+    if swap_request is None:
+        await state.clear()
+        return await message.answer("Ошибка создания запроса", reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard())
+
     await state.clear()
 
     await bot.send_message(
         chat_id=target_user_id, 
         text=text,
-        reply_markup=InlineKeyboardBuilderFactory().create_acceptance_swap_keyboard(queue_id, target_pos, entry.position),
+        reply_markup=InlineKeyboardBuilderFactory().create_acceptance_swap_keyboard(swap_request.id),
         parse_mode="HTML"
     )
 
@@ -482,71 +572,69 @@ async def send_comment_handler(message: Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data.startswith("swap:"))
 async def swap_offer_handle(callback_query: CallbackQuery, bot: Bot):
-    _, action, queue_id, current_pos, target_pos = callback_query.data.split(":")
-    queue_id = int(queue_id)
-    current_pos = int(current_pos)
-    target_pos = int(target_pos)
+    _, action, request_id = callback_query.data.split(":")
+    request_id = int(request_id)
 
-    user = await get_user_by_position(queue_id, current_pos)
+    async with async_session() as session:
+        result = await session.execute(
+            select(SwapRequest).options(
+                selectinload(SwapRequest.queue).selectinload(QueueModel.entries).selectinload(QueueEntry.user),
+                selectinload(SwapRequest.sender), 
+                selectinload(SwapRequest.target))
+                .filter_by(id=request_id)
+        )
+        request = result.scalar_one_or_none()
 
-    swap_request = await has_active_swap_request(queue_id, user.id)
+        if not request:
+            await callback_query.answer("Запрос уже недействителен")
+            return await callback_query.message.delete()
 
-    if not swap_request:
-        await callback_query.answer("Запрос был отменён")
-        return await callback_query.message.delete()
+        if action == "accept":
+            success, res_1, res_2 = await swap_users_in_queue(
+                session, request.queue_id, request.sender_id, request.target_id
+            )
+            
+            if success:
+                entry_sender = res_1 if res_1.user_id == request.sender_id else res_2
+                entry_target = res_2 if res_1.user_id == request.sender_id else res_1
+                await bot.send_message(
+                    request.sender_id, 
+                    f"✅ Обмен принят!\nОчередь <b>{request.queue.name}</b>\nВаше место {entry_sender.position}"
+                )
+                await callback_query.message.edit_text(
+                    f"✅ Обмен выполнен! Очередь <b>{request.queue.name}</b>\nВаше место {entry_target.position}"
+                )
+                await session.delete(request)
+                await session.commit()
+            else:
+                await callback_query.answer("Ошибка: кто-то вышел из очереди")
 
-    if action == "accept":
-        await accept_offer(callback_query, queue_id, from_pos=current_pos, new_pos=target_pos, bot=bot)
-    elif action == "decline":
-        await decline_offer(callback_query, queue_id, from_pos=current_pos, new_pos=target_pos, bot=bot)
+        elif action == "decline":
+            await bot.send_message(request.sender_id, f"❌ Пользователь @{request.target.username} отказал в обмене")
+            await callback_query.message.edit_text(f"Вы отклонили запрос @{request.sender.username}")
+            await session.delete(request)
+            await session.commit()
 
+    user_id = callback_query.from_user.id
+    queue = request.queue
 
-async def accept_offer(callback_query: CallbackQuery, queue_id: int, from_pos: int, new_pos: int, bot: Bot):
-    success, entry_from, entry_to = await swap_users_in_queue_by_pos(queue_id, from_pos, new_pos)
-    
-    if not success:
-        await callback_query.message.delete()
-        return await callback_query.answer("Пользователь не найден в очереди")
-
-    await bot.send_message(
-        chat_id=entry_from.user_id,
-        text=f"Предложение смены позиции в очереди <b>{entry_to.queue.name}</b>\nПринято пользователем @{entry_from.user.username}\nПозиция: {new_pos} –> {from_pos}",
-        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
-        parse_mode="HTML"
+    text, keyboard = await generate_queue_message(
+        user_id, 
+        queue, 
+        callback_query.message.chat.type in ["group", "supergroup"],
+        bot
     )
+    try:
+        return await callback_query.message.edit_text(
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except Exception:
+        logger.info("Ошибка при изменении сообщения очереди")
+        pass
 
-    await callback_query.message.edit_text(
-        f"Вы поменялись местами с пользователем @{entry_to.user.username}\nПозиция в очереди <b>{entry_to.queue.name}</b>: {entry_from.position} –> {entry_to.position}",
-        parse_mode="HTML"
-    )
-
-    user_from = await get_user_by_position(queue_id, new_pos)
-    user_to = await get_user_by_position(queue_id, from_pos)
-    logger.info(f"from: {user_from.id}, to: {user_to.id}")
-
-    await delete_swap_request_by_users(queue_id, user_to.id, user_from.id)
-
-async def decline_offer(callback_query: CallbackQuery, queue_id: int, from_pos: int, new_pos: int, bot: Bot):
-    entry_from = await get_entry_by_position(queue_id, from_pos)
-    entry_to = await get_entry_by_position(queue_id, new_pos)
-
-    await bot.send_message(
-        chat_id=entry_to.user_id,
-        text=f"Предложение смены позиции в очереди <b>{entry_to.queue.name}</b>\bОтклонено пользователем @{entry_from.user.username}\n",
-        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
-        parse_mode="HTML"
-    )
-
-    await callback_query.message.edit_text(
-        f"Предложение смены позиции в очереди <b>{entry_to.queue.name}</b> с пользователем @{entry_to.user.username} отклонено!",
-        parse_mode="HTML"
-    )
-
-    user_from = await get_user_by_position(queue_id, new_pos)
-    user_to = await get_user_by_position(queue_id, from_pos)
-    logger.info(f"from: {user_from.id}, to: {user_to.id}")
-
-    await delete_swap_request_by_users(queue_id, user_to.id, user_from.id)
+    await process_queue_updates(bot, request.queue_id)
 
 async def queue_back_hanlder(callback_query: CallbackQuery):
     return await open_queue_callback(callback_query)
@@ -581,5 +669,58 @@ async def send_queue_message_command(message: Message):
             adjust=[2] * len(queues),),
         parse_mode="HTML"
     )
+
+async def process_queue_updates(bot: Bot, queue_id: int):
+    await update_live_queue(bot, queue_id)
+
+    queue = await get_queue_by_id(queue_id)
+    if not queue:
+        return
+
+    if not queue.entries:
+        await clear_notified_next_id(queue_id)
+        return await clear_speaker_id(queue_id)
+
+    if len(queue.entries) > 0:
+        first_student = await get_entry_by_position(queue_id, 1)
+        if queue.current_speaker_id and queue.current_speaker_id == first_student.user_id:
+            pass
+        else:
+            await set_speaker_id(queue_id, first_student.user_id)
+            try:
+                await bot.send_message(
+                    chat_id=first_student.user_id,
+                    text=f"🔔 <b>Твоё время пришло!</b>\nПора отвечать в очереди <b>{queue.name}</b>. Удачи!",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                if queue.last_chat_id:
+                    await bot.send_message(
+                        chat_id=queue.last_chat_id,
+                        text=f"📢 @{first_student.user.username}, твоя очередь в списке «{queue.name}»!"
+                    )
+                logger.info("Не удалось отправить сообщение лично")
+
+        second_student = await get_entry_by_position(queue_id, 2)
+        if second_student is None:
+            return await clear_notified_next_id(queue_id)
+        
+        if queue.notified_next_id and queue.notified_next_id == second_student.user_id:
+            pass
+        else:
+            await set_notified_next_id(queue_id, second_student.user_id)
+            try:
+                await bot.send_message(
+                    chat_id=second_student.user_id,
+                    text=f"⏳ <b>Приготовься, ты следующий!</b>\n\nГотовься отвечать в очереди <b>{queue.name}</b>",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                if queue.last_chat_id:
+                    await bot.send_message(
+                        chat_id=queue.last_chat_id,
+                        text=f"🏃 @{second_student.user.username}, готовься, ты следующий в очереди «{queue.name}»!"
+                    )
+                logger.info("Не удалось отправить сообщение лично")
 
 # End of queues handlers

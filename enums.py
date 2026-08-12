@@ -9,6 +9,7 @@ class MainMenuButtons(Enum):
     JOIN_ROOM = "Присоединиться к комнате"
     USER_ROOMS = "Мои комнаты"
     CANCEL = "Отмена"
+    CONFIRM = "Подтвердить"
 
 
 class RoomInlineButtons(Enum):
@@ -33,6 +34,8 @@ class QueueInlineButtons(Enum):
     SETTINGS_QUEUE = "Настройки"
     RENAME_QUEUE = "Переименовать"
     DELETE_QUEUE = "Удалить"
+    CLEAR_QUEUE = "Очистить"
+    MOVE_QUEUE = "Сдвинуть"
 
 
 class MemberInlineButtons(Enum):
