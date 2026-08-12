@@ -1,4 +1,4 @@
-from database.models import QueueEntry, QueueModel, SwapRequest
+from database.models import QueueEntry, QueueModel, RoomModel, SwapRequest
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import selectinload
 from database.session import async_session
@@ -297,3 +297,62 @@ async def clear_queue_entries(queue_id: int):
             .where(QueueEntry.queue_id == queue_id)
         )
         await session.commit()
+
+async def delete_first_entry(queue_id: int):
+    async with async_session() as session:
+        await session.execute(
+            delete(QueueEntry)
+            .where(
+                QueueEntry.queue_id == queue_id,
+                QueueEntry.position == 1
+            )
+        )
+        await session.commit()
+
+async def clear_speaker_id(queue_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if queue is not None:
+            queue.current_speaker_id = None
+            await session.commit()
+
+async def set_speaker_id(queue_id: int, user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if queue is not None:
+            queue.current_speaker_id = user_id
+            await session.commit()
+
+async def clear_notified_next_id(queue_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if queue is not None:
+            queue.notified_next_id = None
+            await session.commit()
+
+async def set_notified_next_id(queue_id: int, user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(QueueModel)
+            .filter(QueueModel.id == queue_id)
+        )
+        queue = result.scalar_one_or_none()
+
+        if queue is not None:
+            queue.notified_next_id = user_id
+            await session.commit()

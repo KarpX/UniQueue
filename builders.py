@@ -82,13 +82,15 @@ class InlineKeyboardBuilderFactory:
         if in_group:
             swap_url = f"https://t.me/{bot_username}?start=swap_{queue_id}"
 
-            buttons.append((QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"))
-            buttons.append((QueueInlineButtons.EXIT_QUEUE.value, f"queue_control:exit:{queue_id}"))
+            buttons += [
+                (QueueInlineButtons.EXIT_QUEUE.value, f"queue_control:exit:{queue_id}"),
+                (QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"),
+                (QueueInlineButtons.SKIP_QUEUE.value, f"queue_control:skip:{queue_id}"),
+                (QueueInlineButtons.MOVE_QUEUE.value, f"queue_admin:move:{queue_id}"),
+                (QueueInlineButtons.SWAP_QUEUE.value, swap_url)
+            ]
     
-            buttons.append((QueueInlineButtons.SKIP_QUEUE.value, f"queue_control:skip:{queue_id}"))
-            buttons.append((QueueInlineButtons.SWAP_QUEUE.value, swap_url))
-    
-            return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 1, 1])
+            return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 2, 1])
         
         if not is_in_queue:
             buttons.append((QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"))
