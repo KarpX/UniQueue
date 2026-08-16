@@ -2,7 +2,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from sqlalchemy.orm import selectinload
 
-from accessors.rooms import get_room_by_chat_id, get_room_with_queue
+from accessors.rooms import get_room_by_chat_id, get_room_by_id, get_room_with_queue
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
 from accessors.queues import clear_msg_and_chat_ids, clear_notified_next_id, clear_queue_entries, clear_speaker_id, create_swap_request, delete_first_entry, delete_queue, delete_swap_request, delete_swap_request_by_users, get_entry_by_position, get_entry_by_user_id, get_entry_with_user_by_user_id, get_queue_by_id, get_queue_with_data, get_swap_request_by_id, has_active_swap_request, reindex_queue, set_notified_next_id, set_speaker_id, swap_users_in_queue, swap_users_in_queue_by_pos, update_msg_and_chat_ids
 from aiogram.fsm.context import FSMContext
@@ -109,9 +109,11 @@ async def process_queue_name(message, state):
         session.add(queue)
         await session.commit()
 
+    room = await get_room_by_id(room_id)
+
     await state.clear()
     return await message.answer(
-        f"✅ Очередь '{queue.name}' успешно создана в комнате с ID {room_id}!",
+        f"✅ Очередь '{queue.name}' успешно создана в комнате <b>{room.name}</b>!",
         reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
     )
 
