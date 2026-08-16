@@ -4,6 +4,8 @@ import os
 
 from aiogram import F, Bot, Dispatcher
 from dotenv import load_dotenv
+from redis import Redis
+from aiogram.fsm.storage.redis import RedisStorage
 
 import handlers.users as handlers_users
 import handlers.rooms as handlers_rooms
@@ -17,9 +19,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+REDIS_HOST = os.getenv("REDIS_HOST")
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+
+redis_client = Redis(host=REDIS_HOST)
+storage = RedisStorage(redis=redis_client)
+dp = Dispatcher(storage=storage)
 
 
 async def main():
