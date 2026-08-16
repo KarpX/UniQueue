@@ -7,7 +7,7 @@ from accessors.queues import get_entry_by_user_id, get_entry_with_user_by_user_i
 from accessors.rooms import change_member_role, delete_room_member, get_room_member_by_user_id
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
 from accessors.users import get_or_create_user
-from aiogram.filters import CommandObject, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 
 from database.models import UserRole
@@ -86,10 +86,55 @@ async def start_command(message: Message, command: CommandObject, state: FSMCont
 @router.message(CommandStart(), ChatAdminFilter())
 async def cmd_start_common(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username)
+
+    welcome_text = (
+        f"👋 <b>Привет, @{user.username}!</b>\n\n"
+        f"Я — <b>UniQueue</b>, твой помощник в организации учебных очередей. "
+        f"Больше не нужно искать списки в бесконечных переписках чата!\n\n"
+        f"<b>Что я умею:</b>\n"
+        f"🏫 <b>Комнаты:</b> Создавай отдельные пространства для каждой группы.\n"
+        f"📝 <b>Очереди:</b> Записывайся на сдачу лаб или зачетов одним нажатием кнопки.\n"
+        f"🤝 <b>Обмен:</b> Предлагай одногруппникам поменяться местами, если не успеваешь.\n"
+        f"🔔 <b>Уведомления:</b> Я пришлю тебе сообщение в личку, когда твоя очередь будет подходить.\n"
+        f"👥 <b>Интеграция:</b> Меня можно добавить в чат вашей группы, чтобы список всегда был перед глазами. Подробнее – /help\n\n"
+        f"Чтобы начать, используй кнопки меню ниже: <b>вступи в комнату</b> по коду от старосты или <b>создай свою</b>! 👇"
+    )
     
     return await message.answer(
-        "Привет! Я бот для управления очередями. Войдите в комнату по ссылке или коду.",
+        welcome_text,
         reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+    )
+
+@router.message(Command("help"))
+async def cmd_help_text(message: Message):
+    help_text = (
+    "🤖 <b>UniQueue: Инструкция по работе в группе</b>\n\n"
+    "Я помогу вам забыть о хаосе со списками в чате. Вот как правильно со мной работать:\n\n"
+    "🛠 <b>Для старост и администраторов:</b>\n"
+    "1. <b>Привязка чата:</b> Используйте команду <code>/bind [код_комнаты]</code>. "
+    "Ваш персональный код можно найти в настройках комнаты в личных сообщениях бота.\n"
+    "2. <b>Вызов списка:</b> Команда <code>/queue</code> выводит доступные очереди.\n"
+    "3. <b>Совет:</b> 📌 <b>Закрепите</b> сообщение с очередью. Я буду автоматически обновлять "
+    "список в этом сообщении при каждом изменении, чтобы вам не пришлось скроллить чат.\n\n"
+    
+    "📝 <b>Как пользоваться студентам:</b>\n"
+    "• <b>Записаться</b> — встать в конец списка.\n"
+    "• <b>🏃 Выйти</b> — удалиться из очереди. <i>Пожалуйста, делайте это сразу после того, как сдали работу!</i>\n"
+    "• <b>🤝 Поменяться</b> — я перенесу вас в личные сообщения, где вы сможете предложить "
+    "любому участнику обменяться местами и написать причину.\n"
+    "• <b>Пропустить</b> — быстрая рокировка со следующим за вами человеком.\n\n"
+    
+    "💡 <b>Важные правила:</b>\n"
+    "• <b>Личка — это пульт:</b> Чтобы я мог прислать вам уведомление <i>«Твоя очередь подошла!»</i>, "
+    "вы <b>обязательно</b> должны запустить меня в личных сообщениях.\n"
+    "• <b>Без спама:</b> Одно сообщение с очередью работает для всех. Не нужно вызывать его многократно.\n\n"
+    
+    "<i>Желаю быстрых сдач и отсутствия «хвостов»! 🚀</i>"
+    )
+
+    return await message.answer(
+        help_text,
+        parse_mode="HTML"
     )
 
 @router.callback_query(F.data.startswith("mem:view"))
