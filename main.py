@@ -4,8 +4,9 @@ import os
 
 from aiogram import F, Bot, Dispatcher
 from dotenv import load_dotenv
-from redis import Redis
+
 from aiogram.fsm.storage.redis import RedisStorage
+from redis.asyncio import Redis
 
 import handlers.users as handlers_users
 import handlers.rooms as handlers_rooms
