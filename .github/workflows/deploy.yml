@@ -17,7 +17,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.PORT }}
           script: |
-            cd /home/projects/uniqueue
+            cd /home/karpx/uniqueue
 
             if [ ! -d ".git" ]; then
               git clone https://github.com/${{ github.repository }}.git .
