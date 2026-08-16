@@ -1,27 +1,15 @@
 import asyncio
 import logging
 import os
-import secrets
-import string
 
 from aiogram import F, Bot, Dispatcher
-from aiogram.filters import Command
-from aiogram.types import CallbackQuery
 from dotenv import load_dotenv
-from sqlalchemy import delete, select
-from sqlalchemy.orm import selectinload
-from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
-from database.models import QueueEntry, QueueModel, RoomMember, RoomModel, UserModel, UserRole
-from database.session import async_session
-from aiogram.fsm.context import FSMContext
-from enums import MainMenuButtons, QueueInlineButtons
+from redis import Redis
+from aiogram.fsm.storage.redis import RedisStorage
 
-# Handlers (business logic / request processing)
 import handlers.users as handlers_users
 import handlers.rooms as handlers_rooms
 import handlers.queues as handlers_queues
-
-from states import CreateQueueState, CreateRoomState, JoinRoomState
 
 
 load_dotenv()
@@ -31,9 +19,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+REDIS_HOST = os.getenv("REDIS_HOST")
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+
+redis_client = Redis(host=REDIS_HOST)
+storage = RedisStorage(redis=redis_client)
+dp = Dispatcher(storage=storage)
 
 
 async def main():

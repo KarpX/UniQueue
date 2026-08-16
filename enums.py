@@ -5,37 +5,37 @@ MEMBERS_PER_PAGE = 10
 
 
 class MainMenuButtons(Enum):
-    CREATE_ROOM = "Создать комнату"
-    JOIN_ROOM = "Присоединиться к комнате"
-    USER_ROOMS = "Мои комнаты"
-    CANCEL = "Отмена"
-    CONFIRM = "Подтвердить"
+    CREATE_ROOM = "➕ Создать комнату"
+    JOIN_ROOM = "🔑 Войти по коду"
+    USER_ROOMS = "📂 Мои комнаты"
+    CANCEL = "❌ Отмена"
+    CONFIRM = "✅ Подтвердить"
 
 
 class RoomInlineButtons(Enum):
-    QUEUES_LIST = "Очереди"
-    LEAVE_ROOM = "Выйти из комнаты"
-    BACK_ROOM = "Назад"
+    QUEUES_LIST = "📋 Список очередей"
+    LEAVE_ROOM = "🚪 Покинуть комнату"
+    BACK_ROOM = "⬅️ Назад"
 
     # Admin
-    CREATE_QUEUE = "Создать очередь"
-    SETTINGS_ROOM = "Настройки"
-    MEMBERS = "Участники"
+    CREATE_QUEUE = "🆕 Создать очередь"
+    SETTINGS_ROOM = "⚙️ Настройки комнаты"
+    MEMBERS = "👥 Участники"
 
 
 class QueueInlineButtons(Enum):
-    JOIN_QUEUE = "Записаться"
-    EXIT_QUEUE = "Выйти"
-    SWAP_QUEUE = "Поменяться"
-    SKIP_QUEUE = "Пропустить"
-    BACK_QUEUE = "Назад"
+    JOIN_QUEUE = "📝 Записаться"
+    EXIT_QUEUE = "🏃 Выйти из очереди"
+    SWAP_QUEUE = "🤝 Поменяться"
+    SKIP_QUEUE = "⏭ Пропустить вперед"
+    BACK_QUEUE = "⬅️ Назад"
 
     # Admin
-    SETTINGS_QUEUE = "Настройки"
-    RENAME_QUEUE = "Переименовать"
-    DELETE_QUEUE = "Удалить"
-    CLEAR_QUEUE = "Очистить"
-    MOVE_QUEUE = "Сдвинуть"
+    SETTINGS_QUEUE = "🛠 Управление очередью"
+    RENAME_QUEUE = "✏️ Переименовать"
+    DELETE_QUEUE = "🗑 Удалить"
+    CLEAR_QUEUE = "🧹 Очистить"
+    MOVE_QUEUE = "↕️ Сдвинуть"
 
 
 class MemberInlineButtons(Enum):
@@ -46,17 +46,16 @@ class MemberInlineButtons(Enum):
 
 
 class RoomSettingsButtons(Enum):
-    RENAME_ROOM = "Переименовать"
-    DELETE_ROOM = "Удалить"
-    BACK_ROOM = "Назад"
+    RENAME_ROOM = "🖋 Переименовать комнату"
+    DELETE_ROOM = "🔥 Удалить комнату"
+    BACK_ROOM = "⬅️ Назад"
 
 
 class WritingCommentButtons(Enum):
-    NO_COMMENT = "Пропустить"
+    NO_COMMENT = "⏭ Без комментария"
 
 
 class SwapInlineButtons(Enum):
-    ACCEPT = "Принять"
-    DECLINE = "Отклонить"
-
-    CANCEL = "Отменить запрос"
+    ACCEPT = "✅ Принять"
+    DECLINE = "❌ Отклонить"
+    CANCEL = "🗑 Отменить запрос"
