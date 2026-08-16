@@ -102,7 +102,8 @@ async def cmd_start_common(message: Message):
     
     return await message.answer(
         welcome_text,
-        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
     )
 
 @router.message(Command("help"))
@@ -134,6 +135,7 @@ async def cmd_help_text(message: Message):
 
     return await message.answer(
         help_text,
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
         parse_mode="HTML"
     )
 
