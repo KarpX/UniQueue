@@ -27,7 +27,7 @@ class QueueInlineButtons(Enum):
     JOIN_QUEUE = "📝 Записаться"
     EXIT_QUEUE = "🏃 Выйти из очереди"
     SWAP_QUEUE = "🤝 Поменяться"
-    SKIP_QUEUE = "⏭ Пропустить вперед"
+    SKIP_QUEUE = "⏭ Пропустить"
     BACK_QUEUE = "⬅️ Назад"
 
     # Admin
