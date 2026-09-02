@@ -116,7 +116,7 @@ async def room_callback(callback_query: CallbackQuery):
             f"👤 Ваша роль: <b>{'Админ' if user_role == UserRole.ADMIN.value else 'Участник'}</b>\n")
     if user_role == UserRole.ADMIN.value:
         text += f"🔑 Код приглашения: <code>{room.invite_code}</code>\n"
-        text += f"🔗 Пригалсительая ссылка:\n{invite_link}"
+        text += f"🔗 Пригласительная ссылка:\n{invite_link}"
     return await callback_query.message.edit_text(
         text,
         reply_markup=InlineKeyboardBuilderFactory().room_inline_keyboard(user_role, room_id=room.id),
@@ -356,8 +356,9 @@ async def process_invite_code(message, state: FSMContext):
         existing_member = await session.get(RoomMember, (user.id, room.id))
         if existing_member:
             await message.answer(
-                f"ℹ️ Вы уже состоите в комнате '{room.name}'",
-                reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+                f"ℹ️ Вы уже состоите в комнате <b>{room.name}</b>",
+                reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+                parse_mode="HTML"
             )
             await state.clear()
             return
@@ -368,8 +369,9 @@ async def process_invite_code(message, state: FSMContext):
 
     await state.clear()
     return await message.answer(
-        f"✅ Вы успешно присоединились к комнате '{room.name}'!",
-        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+        f"✅ Вы успешно присоединились к комнате <b>{room.name}</b>!",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
     )
 
 @router.callback_query(F.data.startswith("queue:"))
@@ -480,5 +482,24 @@ async def cmd_bind(message: Message, command: CommandObject):
 
     room = await bind_room_to_chat(room.id, chat_id)
     await message.answer(f"🔗 Группа успешно привязана к комнате <b>{room.name}</b>", parse_mode="HTML")
+
+@router.message(Command("unbind"), F.chat.type.in_({"group", "supergroup"}), ChatAdminFilter())
+async def cmd_unbind(message: Message, command: CommandObject):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(RoomModel).filter_by(telegram_chat_id=chat_id)
+        )
+        room = result.scalar_one_or_none()
+
+        if not room or room.creator_id != user_id:
+            return await message.answer("🚫 Вы должны быть создателем комнаты")
+
+        room.telegram_chat_id = None
+        await session.commit()
+
+    await message.answer(f"🔗 Группа успешно отвязана от комнаты <b>{room.name}</b>", parse_mode="HTML")
 
 # End of rooms handlers

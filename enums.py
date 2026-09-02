@@ -35,7 +35,7 @@ class QueueInlineButtons(Enum):
     RENAME_QUEUE = "✏️ Переименовать"
     DELETE_QUEUE = "🗑 Удалить"
     CLEAR_QUEUE = "🧹 Очистить"
-    MOVE_QUEUE = "↕️ Сдвинуть"
+    MOVE_QUEUE = "➡️ Сдвинуть"
 
 
 class MemberInlineButtons(Enum):

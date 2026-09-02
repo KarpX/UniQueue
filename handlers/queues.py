@@ -4,7 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from accessors.rooms import get_room_by_chat_id, get_room_by_id, get_room_with_queue
 from builders import InlineKeyboardBuilderFactory, ReplyKeyboardBuilderFactory
-from accessors.queues import clear_msg_and_chat_ids, clear_notified_next_id, clear_queue_entries, clear_speaker_id, create_swap_request, delete_first_entry, delete_queue, delete_swap_request, delete_swap_request_by_users, get_entry_by_position, get_entry_by_user_id, get_entry_with_user_by_user_id, get_queue_by_id, get_queue_with_data, get_swap_request_by_id, has_active_swap_request, reindex_queue, set_notified_next_id, set_speaker_id, swap_users_in_queue, swap_users_in_queue_by_pos, update_msg_and_chat_ids
+from accessors.queues import clear_msg_and_chat_ids, clear_notified_next_id, clear_queue_entries, clear_speaker_id, create_swap_request, delete_first_entry, delete_queue, delete_swap_request, delete_swap_request_by_users, ensure_user_in_room, get_entry_by_position, get_entry_by_user_id, get_entry_with_user_by_user_id, get_queue_by_id, get_queue_with_data, get_swap_request_by_id, has_active_swap_request, reindex_queue, set_notified_next_id, set_speaker_id, swap_users_in_queue, swap_users_in_queue_by_pos, update_msg_and_chat_ids
 from aiogram.fsm.context import FSMContext
 from accessors.users import get_or_create_user
 from database.session import async_session
@@ -27,6 +27,8 @@ async def update_live_queue(bot: Bot, queue_id: int):
     if not queue or not queue.last_msg_id:
         return
 
+    print(f"Updating live queue message for queue_id: {queue_id}, last_msg_id: {queue.last_msg_id}, last_chat_id: {queue.last_chat_id}")
+
     text, keyboard = await generate_queue_message(user_id=0, queue=queue, in_group=True, bot=bot)
 
     try:
@@ -38,6 +40,7 @@ async def update_live_queue(bot: Bot, queue_id: int):
             parse_mode="HTML"
         )
     except TelegramBadRequest as e:
+        logger.error(f"Failed to update live queue message for queue_id {queue_id}: {e}")
         if "message is not modified" in str(e):
             pass
         elif "message to edit not found" in str(e):
@@ -113,8 +116,9 @@ async def process_queue_name(message, state):
 
     await state.clear()
     return await message.answer(
-        f"✅ Очередь '{queue.name}' успешно создана в комнате <b>{room.name}</b>!",
-        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard()
+        f"✅ Очередь <b>{queue.name}</b> успешно создана в комнате <b>{room.name}</b>!",
+        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
     )
 
 @router.callback_query(F.data.startswith("queue_back:"))
@@ -133,7 +137,10 @@ async def open_queue_callback(callback_query: CallbackQuery, bot: Bot, queue_id:
 
     if callback_query.data.startswith("open_queue:") and len(data) > 2:
         chat_id = data[2]
-        await bot.pin_chat_message(chat_id, callback_query.message.message_id)
+        try:
+            await bot.pin_chat_message(chat_id, callback_query.message.message_id)
+        except Exception as e:
+            logger.error(f"Failed to pin message in chat {chat_id}: {e}")
 
     text, keyboard = await generate_queue_message(
         callback_query.from_user.id, 
@@ -157,25 +164,15 @@ async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext
     data = callback_query.data.split(":")
     command, queue_id = data[1], int(data[2])
     user_id = callback_query.from_user.id
+    username = callback_query.from_user.username
 
     async with async_session() as session:
         queue = await get_queue_with_data(session, queue_id)
         if not queue:
             return await callback_query.answer("⚠️ Очередь не существует")
 
-        stmt_member = (
-            select(RoomMember)
-            .filter_by(user_id=user_id, room_id=queue.room_id)
-        )
-        result_member = await session.execute(stmt_member)
-        membership = result_member.scalar_one_or_none()
-
-        if not membership:
-            return await callback_query.answer(
-                "❌ Вы не состоите в этой комнате! Сначала вступите в группу.", 
-                show_alert=True
-            )
-
+        is_already_member = await ensure_user_in_room(session, user_id, username, queue.room_id)
+        
         user = await session.get(UserModel, user_id)
         if not user:
             user = UserModel(id=user_id, username=callback_query.from_user.username)
@@ -601,10 +598,12 @@ async def swap_offer_handle(callback_query: CallbackQuery, bot: Bot):
                 entry_target = res_2 if res_1.user_id == request.sender_id else res_1
                 await bot.send_message(
                     request.sender_id, 
-                    f"✅ Обмен принят!\nОчередь <b>{request.queue.name}</b>\nВаше место {entry_sender.position}"
+                    f"✅ Обмен принят!\nОчередь <b>{request.queue.name}</b>\nВаше место {entry_sender.position}",
+                    parse_mode="HTML"
                 )
                 await callback_query.message.edit_text(
-                    f"✅ Обмен выполнен! Очередь <b>{request.queue.name}</b>\nВаше место {entry_target.position}"
+                    f"✅ Обмен выполнен! Очередь <b>{request.queue.name}</b>\nВаше место {entry_target.position}",
+                    parse_mode="HTML"
                 )
                 await session.delete(request)
                 await session.commit()
@@ -616,25 +615,6 @@ async def swap_offer_handle(callback_query: CallbackQuery, bot: Bot):
             await callback_query.message.edit_text(f"❌ Вы отклонили запрос @{request.sender.username}")
             await session.delete(request)
             await session.commit()
-
-    user_id = callback_query.from_user.id
-    queue = request.queue
-
-    text, keyboard = await generate_queue_message(
-        user_id, 
-        queue, 
-        callback_query.message.chat.type in ["group", "supergroup"],
-        bot
-    )
-    try:
-        return await callback_query.message.edit_text(
-            text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
-    except Exception:
-        logger.info("⚠️ Ошибка при изменении сообщения очереди")
-        pass
 
     await process_queue_updates(bot, request.queue_id)
 
