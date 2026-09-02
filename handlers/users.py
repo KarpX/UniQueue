@@ -99,10 +99,16 @@ async def cmd_start_common(message: Message):
         f"👥 <b>Интеграция:</b> Меня можно добавить в чат вашей группы, чтобы список всегда был перед глазами. Подробнее – /help\n\n"
         f"Чтобы начать, используй кнопки меню ниже: <b>вступи в комнату</b> по коду от старосты или <b>создай свою</b>! 👇"
     )
-    
-    return await message.answer(
+
+    if message.chat.type == "private":
+        return await message.answer(
         welcome_text,
         reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+        parse_mode="HTML"
+        )
+
+    return await message.answer(
+        welcome_text,
         parse_mode="HTML"
     )
 
@@ -112,10 +118,13 @@ async def cmd_help_text(message: Message):
     "🤖 <b>UniQueue: Инструкция по работе в группе</b>\n\n"
     "Я помогу вам забыть о хаосе со списками в чате. Вот как правильно со мной работать:\n\n"
     "🛠 <b>Для старост и администраторов:</b>\n"
-    "1. <b>Привязка чата:</b> Используйте команду <code>/bind [код_комнаты]</code>. "
+    "1. <b>Приглашение в комнату:</b> Отправьте код комнаты или пригласительную ссылку участникам. "
+    "Код можно найти в настройках комнаты в личных сообщениях бота.\n"
+    "2. <b>Привязка чата:</b> Используйте команду <code>/bind [код_комнаты]</code>. "
     "Ваш персональный код можно найти в настройках комнаты в личных сообщениях бота.\n"
-    "2. <b>Вызов списка:</b> Команда <code>/queue</code> выводит доступные очереди.\n"
-    "3. <b>Совет:</b> 📌 <b>Закрепите</b>* сообщение с очередью. Я буду автоматически обновлять "
+    "Отвязать чат можно командой <code>/unbind</code>.\n"
+    "3. <b>Вызов списка:</b> Команда <code>/queue</code> выводит доступные очереди.\n"
+    "4. <b>Совет:</b> 📌 <b>Закрепите</b>* сообщение с очередью. Я буду автоматически обновлять "
     "список в этом сообщении при каждом изменении, чтобы вам не пришлось скроллить чат.\n"
     "* Если у меня будут права администратора в группе, то я смогу самостоятельно закреплять сообщения\n\n"
     
@@ -135,9 +144,15 @@ async def cmd_help_text(message: Message):
     "<i>Желаю быстрых сдач и отсутствия «хвостов»! 🚀</i>"
     )
 
+    if message.chat.type == "private":
+        return await message.answer(
+            help_text,
+            reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
+            parse_mode="HTML"
+        )
+
     return await message.answer(
         help_text,
-        reply_markup=ReplyKeyboardBuilderFactory().create_main_menu_keyboard(),
         parse_mode="HTML"
     )
 
@@ -186,7 +201,7 @@ async def change_role(callback_query: CallbackQuery, room_id: int, user_id: int,
 
     await callback_query.message.edit_text(
             text=(
-            f"👤 <b>Карточка участника 2s</b>\n\n"
+            f"👤 <b>Карточка участника</b>\n\n"
             f"Имя: @{user.username or 'Скрыто'}\n"
             f"ID: {user_id}\n"
             f"Роль: {'Администратор 👑' if member.role == UserRole.ADMIN else 'Участник 👤'}"
