@@ -1,4 +1,4 @@
-from database.models import QueueEntry, QueueModel, RoomModel, SwapRequest
+from database.models import QueueEntry, QueueModel, RoomMember, RoomModel, SwapRequest, UserRole
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import selectinload
 from database.session import async_session
@@ -356,3 +356,23 @@ async def set_notified_next_id(queue_id: int, user_id: int):
         if queue is not None:
             queue.notified_next_id = user_id
             await session.commit()
+
+async def ensure_user_in_room(session, user_id: int, username: str, room_id: int):
+    """Проверяет, есть ли юзер в комнате. Если нет — добавляет."""
+    from accessors.users import get_or_create_user
+    await get_or_create_user(user_id, username)
+    
+    stmt = select(RoomMember).filter_by(user_id=user_id, room_id=room_id)
+    result = await session.execute(stmt)
+    membership = result.scalar_one_or_none()
+
+    if not membership:
+        new_member = RoomMember(
+            user_id=user_id,
+            room_id=room_id,
+            role=UserRole.MEMBER
+        )
+        session.add(new_member)
+        await session.flush()
+        return False
+    return True
