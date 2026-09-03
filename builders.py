@@ -2,7 +2,8 @@ import logging
 
 from aiogram.types import InlineKeyboardButton, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from database.models import UserRole
+from accessors.queues import get_queue_by_id
+from database.models import QueueModel, UserRole
 from enums import MainMenuButtons, MemberInlineButtons, QueueInlineButtons, RoomInlineButtons, RoomSettingsButtons, SwapInlineButtons, WritingCommentButtons
 
 
@@ -73,12 +74,13 @@ class InlineKeyboardBuilderFactory:
         user_id: int, 
         is_in_queue: bool,
         room_members_admin_ids: list[int],
-        queue_id: int,
-        room_id: int, 
+        queue: QueueModel,
         in_group: bool = False,
         bot_username = None
         ):
         buttons = []
+        queue_id = queue.id
+        room_id = queue.room_id
         if in_group:
             swap_url = f"https://t.me/{bot_username}?start=swap_{queue_id}"
 
@@ -106,6 +108,9 @@ class InlineKeyboardBuilderFactory:
                 (QueueInlineButtons.MOVE_QUEUE.value, f"queue_admin:move:{queue_id}"),
                 (QueueInlineButtons.SETTINGS_QUEUE.value, f"queue_admin:settings:{queue_id}")
             ]
+
+        if user_id == queue.current_speaker_id:
+            buttons.append((QueueInlineButtons.MOVE_QUEUE.value, f"queue_admin:move:{queue_id}"))
     
         buttons.append((QueueInlineButtons.BACK_QUEUE.value, f"queue:{room_id}"))
 
