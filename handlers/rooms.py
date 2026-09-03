@@ -431,6 +431,8 @@ async def process_member_list(callback_query: CallbackQuery):
     end = start + items_per_page
     members_to_show = members[start:end]
 
+    await callback_query.answer()
+
     return await callback_query.message.edit_text(
         f'👥 Участники комнаты <b>{room.name}</b>:',
         reply_markup=InlineKeyboardBuilderFactory.room_members_keyboard(members_to_show, room_id, page, len(members), items_per_page),

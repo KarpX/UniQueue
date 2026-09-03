@@ -24,10 +24,9 @@ router = Router()
 
 async def update_live_queue(bot: Bot, queue_id: int):
     queue = await get_queue_by_id(queue_id)
+    logger.info(f"Updating queue: {queue.id}, name: {queue.name}, last_msg_id: {queue.last_msg_id}, last_chat_id: {queue.last_chat_id}")
     if not queue or not queue.last_msg_id:
         return
-
-    print(f"Updating live queue message for queue_id: {queue_id}, last_msg_id: {queue.last_msg_id}, last_chat_id: {queue.last_chat_id}")
 
     text, keyboard = await generate_queue_message(user_id=0, queue=queue, in_group=True, bot=bot)
 
@@ -74,8 +73,7 @@ async def generate_queue_message(
         user_id, 
         is_in_queue, 
         room_members_admin_ids, 
-        queue.id, 
-        queue.room_id,
+        queue, 
         in_group,
         bot_info.username)
     
@@ -170,8 +168,6 @@ async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext
         queue = await get_queue_with_data(session, queue_id)
         if not queue:
             return await callback_query.answer("⚠️ Очередь не существует")
-
-        is_already_member = await ensure_user_in_room(session, user_id, username, queue.room_id)
         
         user = await session.get(UserModel, user_id)
         if not user:
@@ -239,6 +235,7 @@ async def queue_control_handler(callback_query: CallbackQuery, state: FSMContext
                 await callback_query.answer("❌ Не удалось выполнить пропуск")
 
         elif command == "swap":
+            await callback_query.answer()
             return await swap_entries_handler(callback_query, state, user_id, queue_id)
 
         await session.commit()
@@ -279,6 +276,7 @@ async def queue_admin_handler(callback_query: CallbackQuery, state: FSMContext, 
         await queue_move_handler(callback_query, bot)
     
     await process_queue_updates(bot, queue_id)
+    await callback_query.answer()
     return
 
 async def queue_move_handler(callback_query: CallbackQuery, bot: Bot):
@@ -381,7 +379,7 @@ async def queue_delete_handler(callback_query: CallbackQuery, state: FSMContext)
     return await queue_callback(callback_query, room_id)
 
 @router.message(CreateQueueState.waiting_for_queue_rename)
-async def queue_rename_text_handler(message, state: FSMContext):
+async def queue_rename_text_handler(message, state: FSMContext, bot: Bot):
     queue_name = message.text
     queue_id = (await state.get_data()).get("queue_id")
     if queue_name == MainMenuButtons.CANCEL.value:

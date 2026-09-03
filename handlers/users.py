@@ -163,6 +163,7 @@ async def view_member_hanlde(callback_query: CallbackQuery):
 
     user = await get_or_create_user(user_id)
     member = await get_room_member_by_user_id(room_id, user_id)
+    await callback_query.answer()
     return await callback_query.message.edit_text(
         text=(
         f"👤 <b>Карточка участника</b>\n\n"
