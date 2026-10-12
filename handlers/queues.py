@@ -20,6 +20,7 @@ from accessors.queues import (
     create_swap_request,
     delete_queue,
     delete_swap_request,
+    ensure_user_in_room,
     get_entry_by_position,
     get_entry_by_user_id,
     get_entry_with_user_by_user_id,
@@ -123,6 +124,15 @@ async def open_queue_callback(callback_query: CallbackQuery, bot: Bot, session: 
     queue = await get_queue_with_data(session, queue_id)
     if not queue:
         return await callback_query.answer("⚠️ Очередь не найдена", show_alert=True)
+
+    await ensure_user_in_room(
+        session=session,
+        user_id=callback_query.from_user.id,
+        username=callback_query.from_user.username,
+        first_name=callback_query.from_user.first_name,
+        last_name=callback_query.from_user.last_name,
+        room_id=queue.room_id
+    )
 
     if callback_query.data.startswith("open_queue:") and len(data) > 2:
         chat_id = data[2]
@@ -360,6 +370,18 @@ async def queue_rename_handler(callback_query: CallbackQuery, state: FSMContext)
 
 
 async def swap_entries_handler(callback_query: CallbackQuery, state: FSMContext, user_id: int, queue_id: int, session: AsyncSession, bot: Bot):
+    queue = await get_queue_by_id(queue_id, session=session)
+    if queue:
+        from_user = callback_query.from_user
+        await ensure_user_in_room(
+            session=session,
+            user_id=user_id,
+            username=from_user.username,
+            first_name=from_user.first_name,
+            last_name=from_user.last_name,
+            room_id=queue.room_id
+        )
+
     active_swap_request = await has_active_swap_request(queue_id, user_id, session=session)
     if active_swap_request:
         if active_swap_request.target_id == user_id:

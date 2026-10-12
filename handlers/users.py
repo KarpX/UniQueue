@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from accessors.queues import (
+    ensure_user_in_room,
     get_entry_by_user_id,
     get_entry_with_user_by_user_id,
     get_queue_by_id,
@@ -53,6 +54,15 @@ async def start_command(message: Message, command: CommandObject, state: FSMCont
         queue = await get_queue_by_id(queue_id, session=session)
         if not queue:
             return await message.answer("⚠️ Очередь не найдена")
+
+        await ensure_user_in_room(
+            session=session,
+            user_id=user_id,
+            username=from_user.username,
+            first_name=from_user.first_name,
+            last_name=from_user.last_name,
+            room_id=queue.room_id
+        )
 
         queue_message, _ = await generate_queue_message(user_id, queue, bot=bot)
 

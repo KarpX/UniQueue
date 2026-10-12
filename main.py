@@ -13,6 +13,7 @@ import handlers.rooms as handlers_rooms
 import handlers.queues as handlers_queues
 from database.session import async_session
 from middlewares.db import DbSessionMiddleware
+from services.swap_cleanup import run_periodic_swap_cleanup
 
 load_dotenv()
 
@@ -58,9 +59,11 @@ async def main():
     bot_info = await bot.get_me()
     dp["bot_username"] = bot_info.username
     logger.info(f"Starting bot @{bot_info.username}")
-
     # Drop old pending updates to prevent event floods on restart
     await bot.delete_webhook(drop_pending_updates=True)
+
+    # Start background worker for periodic swap requests cleanup
+    asyncio.create_task(run_periodic_swap_cleanup(bot))
 
     await dp.start_polling(bot)
 
