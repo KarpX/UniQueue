@@ -2,26 +2,24 @@ import logging
 
 from aiogram.types import InlineKeyboardButton, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from accessors.queues import get_queue_by_id
 from database.models import QueueModel, UserRole
 from enums import MainMenuButtons, MemberInlineButtons, QueueInlineButtons, RoomInlineButtons, RoomSettingsButtons, SwapInlineButtons, WritingCommentButtons
-
+from utils import safe_html
 
 logger = logging.getLogger(__name__)
+
 
 class ReplyKeyboardBuilderFactory:
     @staticmethod
     def build_keyboard(buttons: list[str], adjust: list[int] | None = None) -> ReplyKeyboardBuilder:
         builder = ReplyKeyboardBuilder()
-
         builder.add(*(KeyboardButton(text=btn) for btn in buttons))
-    
         if adjust:
             builder.adjust(*adjust)
         return builder.as_markup(resize_keyboard=True)
 
     @staticmethod
-    def create_main_menu_keyboard() -> ReplyKeyboardBuilder:
+    def create_main_menu_keyboard():
         buttons = [MainMenuButtons.CREATE_ROOM.value, MainMenuButtons.JOIN_ROOM.value, MainMenuButtons.USER_ROOMS.value]
         return ReplyKeyboardBuilderFactory().build_keyboard(buttons, adjust=[1, 1, 1])
 
@@ -43,7 +41,7 @@ class ReplyKeyboardBuilderFactory:
 
 class InlineKeyboardBuilderFactory:
     @staticmethod
-    def build_inline_keyboard(buttons: list[tuple[str, str]], adjust: list[int] | None = None) -> InlineKeyboardBuilder:
+    def build_inline_keyboard(buttons: list[tuple[str, str]], adjust: list[int] | None = None):
         builder = InlineKeyboardBuilder()
 
         for text, data in buttons:
@@ -67,7 +65,7 @@ class InlineKeyboardBuilderFactory:
         buttons.append((RoomInlineButtons.QUEUES_LIST.value, f"queue:{room_id}"))
         buttons.append((RoomInlineButtons.LEAVE_ROOM.value, f"leave_room:{room_id}"))
         buttons.append((RoomInlineButtons.BACK_ROOM.value, "back"))
-        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 2, 1])
+        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 2, 2])
 
     @staticmethod
     def queue_inline_keyboard(
@@ -76,24 +74,23 @@ class InlineKeyboardBuilderFactory:
         room_members_admin_ids: list[int],
         queue: QueueModel,
         in_group: bool = False,
-        bot_username = None
-        ):
-        buttons = []
+        bot_username: str | None = None
+    ):
         queue_id = queue.id
         room_id = queue.room_id
-        if in_group:
-            swap_url = f"https://t.me/{bot_username}?start=swap_{queue_id}"
 
-            buttons += [
-                (QueueInlineButtons.EXIT_QUEUE.value, f"queue_control:exit:{queue_id}"),
+        if in_group:
+            swap_url = f"https://t.me/{bot_username}?start=swap_{queue_id}" if bot_username else "#"
+            buttons = [
                 (QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"),
+                (QueueInlineButtons.EXIT_QUEUE.value, f"queue_control:exit:{queue_id}"),
                 (QueueInlineButtons.SKIP_QUEUE.value, f"queue_control:skip:{queue_id}"),
+                (QueueInlineButtons.SWAP_QUEUE.value, swap_url),
                 (QueueInlineButtons.MOVE_QUEUE.value, f"queue_admin:move:{queue_id}"),
-                (QueueInlineButtons.SWAP_QUEUE.value, swap_url)
             ]
-    
             return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 2, 1])
         
+        buttons = []
         if not is_in_queue:
             buttons.append((QueueInlineButtons.JOIN_QUEUE.value, f"queue_control:join:{queue_id}"))
         else:
@@ -102,19 +99,31 @@ class InlineKeyboardBuilderFactory:
         buttons.append((QueueInlineButtons.SKIP_QUEUE.value, f"queue_control:skip:{queue_id}"))
         buttons.append((QueueInlineButtons.SWAP_QUEUE.value, f"queue_control:swap:{queue_id}:{user_id}"))
     
-        if user_id in room_members_admin_ids:
-            buttons += [
-                (QueueInlineButtons.CLEAR_QUEUE.value, f"queue_admin:clear:{queue_id}"),
-                (QueueInlineButtons.MOVE_QUEUE.value, f"queue_admin:move:{queue_id}"),
-                (QueueInlineButtons.SETTINGS_QUEUE.value, f"queue_admin:settings:{queue_id}")
-            ]
+        is_admin = user_id in room_members_admin_ids
+        is_speaker = (user_id == queue.current_speaker_id)
 
-        if user_id == queue.current_speaker_id:
+        # Move button added once if user is admin or current speaker
+        if is_admin or is_speaker:
             buttons.append((QueueInlineButtons.MOVE_QUEUE.value, f"queue_admin:move:{queue_id}"))
-    
+
+        if is_admin:
+            buttons.append((QueueInlineButtons.CLEAR_QUEUE.value, f"queue_admin:clear:{queue_id}"))
+            buttons.append((QueueInlineButtons.SETTINGS_QUEUE.value, f"queue_admin:settings:{queue_id}"))
+
         buttons.append((QueueInlineButtons.BACK_QUEUE.value, f"queue:{room_id}"))
 
-        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2, 1, 2, 1, 1])
+        # Build dynamic adjust layout: rows of 2, with the last "Back" button on its own row
+        total = len(buttons)
+        adjust = []
+        remaining = total - 1  # excluding back button
+        while remaining > 1:
+            adjust.append(2)
+            remaining -= 2
+        if remaining == 1:
+            adjust.append(1)
+        adjust.append(1)  # Back button
+
+        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=adjust)
 
     @staticmethod
     def queue_settings_keyboard(queue_id: int):
@@ -123,8 +132,7 @@ class InlineKeyboardBuilderFactory:
             (QueueInlineButtons.DELETE_QUEUE.value, f"queue_admin:delete:{queue_id}"),
             (QueueInlineButtons.BACK_QUEUE.value, f"queue_back:{queue_id}")
         ]
-
-        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1])
+        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1, 1])
 
     @staticmethod
     def room_members_keyboard(room_members, room_id: int, page: int, total_count: int, items_per_page: int):
@@ -132,18 +140,16 @@ class InlineKeyboardBuilderFactory:
         adjust = []
 
         for member in room_members:
-            name_label = member.user.username or f"ID: {member.user_id}"
+            display = member.user.username or member.user.first_name or f"ID: {member.user_id}"
             role_icon = "👑 " if member.role == UserRole.ADMIN else "👤 "
-            
             buttons.append((
-                f"{role_icon}{name_label}", 
+                f"{role_icon}{display}", 
                 f"mem:view:{room_id}:{member.user_id}:{page}"
             ))
             adjust.append(1)
 
         if total_count > items_per_page:
             nav_buttons_count = 0
-            
             if page > 0:
                 buttons.append(("⬅️", f"mem:list:{room_id}:0:{page - 1}"))
                 nav_buttons_count += 1
@@ -158,7 +164,7 @@ class InlineKeyboardBuilderFactory:
             
             adjust.append(nav_buttons_count)
 
-        buttons.append(("⬅️ Назад в меню", f"room_view:{room_id}"))
+        buttons.append(("⬅️ Назад в комнату", f"room:{room_id}"))
         adjust.append(1)
 
         return InlineKeyboardBuilderFactory.build_inline_keyboard(buttons, adjust=adjust)
@@ -166,15 +172,13 @@ class InlineKeyboardBuilderFactory:
     @staticmethod
     def member_settings_keyboard(room_id: int, user_id: int, role):
         buttons = []
-
         if role == UserRole.MEMBER:
             buttons.append((MemberInlineButtons.MAKE_ADMIN.value, f"member_settings:make_admin:{room_id}:{user_id}"))
-
         else:
             buttons.append((MemberInlineButtons.MAKE_MEMBER.value, f"member_settings:make_member:{room_id}:{user_id}"))
 
         buttons.append((MemberInlineButtons.KICK_MEMBER.value, f"member_settings:kick_member:{room_id}:{user_id}"))
-        buttons.append((MemberInlineButtons.BACK_MEMBER, f"member_back:members:{room_id}:{user_id}"))
+        buttons.append((MemberInlineButtons.BACK_MEMBER.value, f"member_back:members:{room_id}:{user_id}"))
 
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1, 1])
 
@@ -185,8 +189,15 @@ class InlineKeyboardBuilderFactory:
             (RoomSettingsButtons.DELETE_ROOM.value, f"room_admin_settings:delete:{room_id}"),
             (RoomSettingsButtons.BACK_ROOM.value, f"room:{room_id}")
         ]
-
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1, 1])
+
+    @staticmethod
+    def room_delete_confirmation_keyboard(room_id: int):
+        buttons = [
+            ("🔥 Да, удалить навсегда", f"room_admin_settings:confirm_delete:{room_id}"),
+            ("❌ Отмена", f"room:{room_id}")
+        ]
+        return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[1, 1])
 
     @staticmethod
     def create_acceptance_swap_keyboard(swap_request_id: int):
@@ -194,13 +205,11 @@ class InlineKeyboardBuilderFactory:
             (SwapInlineButtons.DECLINE.value, f"swap:decline:{swap_request_id}"),
             (SwapInlineButtons.ACCEPT.value, f"swap:accept:{swap_request_id}")
         ]
-
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons, adjust=[2])
 
     @staticmethod
     def create_cancel_swap_request_keyboard(swap_id: int):
         buttons = [(SwapInlineButtons.CANCEL.value, f"cancel_request:{swap_id}")]
-
         return InlineKeyboardBuilderFactory().build_inline_keyboard(buttons)
 
     @staticmethod
@@ -209,5 +218,4 @@ class InlineKeyboardBuilderFactory:
             (MainMenuButtons.CONFIRM.value, f"confirm:{target_id}:{action}"),
             (MainMenuButtons.CANCEL.value, f"back:{target_id}:{action}")
         ]
-
         return InlineKeyboardBuilderFactory.build_inline_keyboard(buttons, adjust=[2])
