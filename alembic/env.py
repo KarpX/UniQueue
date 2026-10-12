@@ -19,7 +19,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 
-from database.models import UserModel, RoomModel, QueueModel, RoomMember, QueueEntry
+from database.models import UserModel, RoomModel, QueueModel, RoomMember, QueueEntry, SwapRequest
 target_metadata = BaseModel.metadata
 
 
